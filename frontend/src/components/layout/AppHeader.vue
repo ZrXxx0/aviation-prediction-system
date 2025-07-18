@@ -1,19 +1,19 @@
 <template>
   <header class="app-header">
-    <div class="logo">数据分析系统</div>
+    <div class="logo">航空市场需求分析预测</div>
 
     <nav class="nav-links">
       <router-link
           to="/dashboard"
           :class="{ active: currentRoute === '/dashboard' }"
       >
-        看板
+        数据看板
       </router-link>
       <router-link
           to="/forecast"
           :class="{ active: currentRoute === '/forecast' }"
       >
-        预测
+        预测分析
       </router-link>
     </nav>
 

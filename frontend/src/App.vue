@@ -27,5 +27,15 @@ import AppFooter from '@/components/layout/AppFooter.vue' // 简单页脚组件
   background-color: #f5f7fa;
   padding: 1rem 0;
   width: 100%;
+  padding-bottom: 0px;
+}
+
+.app-footer {
+  width: 100%;
+  text-align: center;
+  color: #888;
+  font-size: 14px;
+  padding: 16px 0;
+  background: #f5f5f5;
 }
 </style>

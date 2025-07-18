@@ -6,9 +6,12 @@
     </div>
 
     <div ><el-date-picker
-        v-model="value1"
-        type="date"
-        placeholder="选择日期">
+        v-model="selectedDate"
+        type="month"
+        placeholder="选择年月"
+        value-format="yyyy-MM"
+        @change="updateChart"
+    >
     </el-date-picker></div>
 
     <div class="indicators">

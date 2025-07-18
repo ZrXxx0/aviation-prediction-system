@@ -1,5 +1,12 @@
 <template>
   <div class="content">
+    <div style="display: flex; justify-content: center;margin-bottom: 20px">
+      <div style="display: flex; align-items: center;">
+        <Decoration8 style="width:200px; height:40px;" />
+        <h1 style="color: #0065e2;margin-top: 40px;margin-left: 20px;margin-right: 20px">可视化分析</h1>
+        <Decoration8 :reverse="true" style="width:200px; height:40px;" />
+      </div>
+    </div>
     <div ref="charts" style="width:600px;height:500px;margin:0 auto"></div>
   </div>
 </template>
@@ -7,6 +14,7 @@
 <script>
 import * as echarts from 'echarts'
 import china from '@/assets/china.json'
+import { Decoration8 } from 'datav-vue3';
 export default {
   data() {
     return {
