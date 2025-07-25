@@ -111,11 +111,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue';
 import type { ElSelect, ElOption, CascaderOption, CascaderProps } from 'element-plus';
 import { Decoration1 , Decoration7 } from 'datav-vue3';
 import * as echarts from 'echarts';
 import chinaMap from '@/assets/china.json';
+import * as XLSX from 'xlsx';
 
 echarts.registerMap('china', chinaMap);
 
@@ -126,42 +127,33 @@ const selectedStartCity = ref([''] as string[]); // 起始城市
 const selectedEndCity = ref([''] as string[]); // 终点城市
 const selectedStatType = ref('capacity');
 const provinces = ref(['北京', '上海', '广东', '江苏', '浙江', '四川', '山东', '河南', '湖北', '湖南']);
-const cityMap = {
-  '北京': ['北京'],
-  '上海': ['上海'],
-  '广东': ['广州', '深圳'],
-  '江苏': ['南京'],
-  '浙江': ['杭州'],
-  '四川': ['成都'],
-  '山东': ['青岛'],
-  '河南': ['郑州'],
-  '湖北': ['武汉'],
-  '湖南': ['长沙'],
-};
-const cities = ref(Object.keys({
-  '上海': [121.480237, 31.236305],
-  '北京': [116.413554, 39.911013],
-  '广州': [113.270793, 23.135308],
-  '深圳': [114.066112, 22.548515],
-  '成都': [104.071216, 30.576279],
-  '重庆': [106.557165, 29.570997],
-  '杭州': [120.161693, 30.280059],
-  '南京': [118.802891, 32.064735],
-  '武汉': [114.311831, 30.598428],
-  '西安': [108.946306, 34.347436],
-  '天津': [117.205914, 39.090908],
-  '郑州': [113.631349, 34.753488],
-  '长沙': [112.945333, 28.233971],
-  '沈阳': [123.438973, 41.811339],
-  '昆明': [102.839667, 24.885953],
-  '乌鲁木齐': [87.623314, 43.832806],
-  '哈尔滨': [126.542417, 45.807782],
-  '大连': [121.621391, 38.919345],
-  '青岛': [120.389445, 36.072358],
-  '厦门': [118.095915, 24.485821],
-  '三亚': [109.518646, 18.258217],
-  '拉萨': [91.121025, 29.650088]
-}));
+const cityMap = ref<Record<string, string[]>>({});
+const geoCoordMap = ref<Record<string, [number, number]>>({});
+
+async function loadCityData() {
+  const response = await fetch('/src/assets/城市经纬度.xlsx');
+  const arrayBuffer = await response.arrayBuffer();
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const data = XLSX.utils.sheet_to_json(sheet);
+
+  const cityMapTemp: Record<string, string[]> = {};
+  const geoCoordMapTemp: Record<string, [number, number]> = {};
+
+  data.forEach((row: any) => {
+    const province = row['省份'];
+    const city = row['城市'];
+    const lng = Number(row['经度']);
+    const lat = Number(row['纬度']);
+    if (!cityMapTemp[province]) cityMapTemp[province] = [];
+    cityMapTemp[province].push(city);
+    geoCoordMapTemp[city] = [lng, lat];
+  });
+
+  cityMap.value = cityMapTemp;
+  geoCoordMap.value = geoCoordMapTemp;
+}
+
 const currentDate = ref(new Date().toLocaleDateString('zh-CN', {
   year: 'numeric',
   month: 'long',
@@ -171,30 +163,6 @@ const currentDate = ref(new Date().toLocaleDateString('zh-CN', {
 const mapChart = ref(null);
 const barChart = ref(null);
 // 地理坐标数据
-const geoCoordMap = {
-  '上海': [121.480237, 31.236305],
-  '北京': [116.413554, 39.911013],
-  '广州': [113.270793, 23.135308],
-  '深圳': [114.066112, 22.548515],
-  '成都': [104.071216, 30.576279],
-  '重庆': [106.557165, 29.570997],
-  '杭州': [120.161693, 30.280059],
-  '南京': [118.802891, 32.064735],
-  '武汉': [114.311831, 30.598428],
-  '西安': [108.946306, 34.347436],
-  '天津': [117.205914, 39.090908],
-  '郑州': [113.631349, 34.753488],
-  '长沙': [112.945333, 28.233971],
-  '沈阳': [123.438973, 41.811339],
-  '昆明': [102.839667, 24.885953],
-  '乌鲁木齐': [87.623314, 43.832806],
-  '哈尔滨': [126.542417, 45.807782],
-  '大连': [121.621391, 38.919345],
-  '青岛': [120.389445, 36.072358],
-  '厦门': [118.095915, 24.485821],
-  '三亚': [109.518646, 18.258217],
-  '拉萨': [91.121025, 29.650088]
-};
 // 航线数据
 const datas = [[{name: '上海'}, {name: '北京', value: 322}],
   [{name: '上海'}, {name: '广州', value: 350}],
@@ -220,14 +188,25 @@ const datas = [[{name: '上海'}, {name: '北京', value: 322}],
   [{name: '哈尔滨'}, {name: '北京', value: 570}],
   [{name: '青岛'}, {name: '上海', value: 134}],
   [{name: '厦门'}, {name: '北京', value: 56}],
-  [{name: '三亚'}, {name: '北京', value: 56}]];
+  [{name: '三亚'}, {name: '北京', value: 56}],
+  [{name: '南京'}, {name: '深圳', value: 120}],
+  [{name: '南京'}, {name: '成都', value: 90}],
+  [{name: '合肥'}, {name: '上海', value: 80}],
+  [{name: '合肥'}, {name: '广州', value: 70}],
+  [{name: '厦门'}, {name: '成都', value: 60}],
+  [{name: '青岛'}, {name: '深圳', value: 110}],
+  [{name: '西安'}, {name: '杭州', value: 95}],
+  [{name: '重庆'}, {name: '南京', value: 85}],
+  [{name: '长沙'}, {name: '合肥', value: 75}],
+  [{name: '哈尔滨'}, {name: '成都', value: 65}],
+];
 // 转换航线数据
 const convertData = (data) => {
   const res = [];
   for (let i = 0; i < data.length; i++) {
     const dataItem = data[i];
-    const fromCoord = geoCoordMap[dataItem[0].name];
-    const toCoord = geoCoordMap[dataItem[1].name];
+    const fromCoord = geoCoordMap.value[dataItem[0].name];
+    const toCoord = geoCoordMap.value[dataItem[1].name];
     if (fromCoord && toCoord) {
       res.push({
         fromName: dataItem[0].name,
@@ -248,6 +227,47 @@ const initCharts = () => {
 };
 // 渲染地图
 const renderMap = () => {
+  // 获取当前选择的城市
+  let city = selectedMapCity.value && selectedMapCity.value.length > 1
+    ? selectedMapCity.value[1]
+    : (selectedMapCity.value && selectedMapCity.value.length === 1 ? selectedMapCity.value[0] : '');
+
+  // 过滤航线数据
+  let filteredDatas = datas;
+  if (city && city !== '') {
+    filteredDatas = datas.filter(d => d[0].name === city);
+  }
+
+  // 有航线的城市
+  const flightCities = new Set(filteredDatas.flatMap(d => [d[0].name, d[1].name]));
+  // 所有城市
+  const allCities = Object.keys(geoCoordMap.value);
+
+  const allCityData = allCities.map(city => ({
+    name: city,
+    value: geoCoordMap.value[city],
+    itemStyle: { color: '#fff' }, // 小白点
+    label: { show: false }
+  }));
+
+  const flightCityData = Array.from(flightCities).map(city => ({
+    name: city,
+    value: geoCoordMap.value[city],
+    itemStyle: { color: '#e6c652' }, // 高亮色
+    label: { show: true, position: 'right', formatter: '{b}' }
+  }));
+
+  // 新增：高亮选中城市（无论是否有航线）
+  const selectedCityData = city && city !== '' && geoCoordMap.value[city]
+    ? [{
+        name: city,
+        value: geoCoordMap.value[city],
+        itemStyle: { color: 'red' },
+        symbolSize: 16,
+        label: { show: true, position: 'right', formatter: '{b}', color: 'red', fontWeight: 'bold' }
+      }]
+    : [];
+
   const option = {
     backgroundColor: '#c0dcef',
     tooltip: {
@@ -265,26 +285,44 @@ const renderMap = () => {
       roam: true,
       itemStyle: {normal: {areaColor: '#323c48', borderColor: '#404a59'}, emphasis: {areaColor: '#2a333d'}}
     },
-    series: [{
-      name: '地点',
-      type: 'effectScatter',
-      coordinateSystem: 'geo',
-      zlevel: 2,
-      rippleEffect: {brushType: 'stroke'},
-      label: {normal: {show: true, position: 'right', formatter: '{b}'}},
-      symbolSize: 8,
-      showEffectOn: 'render',
-      itemStyle: {normal: {color: '#46e949'}},
-      data: Object.keys(geoCoordMap).map(city => ({name: city, value: geoCoordMap[city]}))
-    }, {
-      name: '航线',
-      type: 'lines',
-      coordinateSystem: 'geo',
-      zlevel: 1,
-      effect: {show: true, period: 4, trailLength: 0.02, symbol: 'arrow', symbolSize: 5},
-      lineStyle: {normal: {color: '#ffffff', width: 1, opacity: 0.6, curveness: 0.2}},
-      data: convertData(datas)
-    }]
+    series: [
+      {
+        name: '所有城市',
+        type: 'scatter',
+        coordinateSystem: 'geo',
+        zlevel: 1,
+        symbolSize: 3,
+        data: allCityData,
+        tooltip: { show: true, formatter: '{b}' }
+      },
+      {
+        name: '航线城市',
+        type: 'scatter',
+        coordinateSystem: 'geo',
+        zlevel: 2,
+        symbolSize: 6,
+        data: flightCityData,
+        tooltip: { show: true, formatter: '{b}' }
+      },
+      // 新增：高亮选中城市
+      {
+        name: '选中城市',
+        type: 'scatter',
+        coordinateSystem: 'geo',
+        zlevel: 3,
+        symbolSize: 16,
+        data: selectedCityData,
+        tooltip: { show: true, formatter: '{b}' }
+      },
+      {
+        name: '航线',
+        type: 'lines',
+        coordinateSystem: 'geo',
+        zlevel: 1,
+        effect: {show: true, period: 4, trailLength: 0.02, symbol: 'arrow', symbolSize: 5},
+        lineStyle: {normal: {color: '#ffffff', width: 1, opacity: 0.6, curveness: 0.2}},
+        data: convertData(filteredDatas)
+      }]
   };
   mapChart.value.setOption(option);
 };
@@ -347,17 +385,17 @@ const handleResize = () => {
   }
 };
 // Cascader options for province/city
-const locationOptions = [
+const locationOptions = computed(() => [
   { label: '全国', value: '' },
-  ...provinces.value.map(province => ({
+  ...Object.keys(cityMap.value).map(province => ({
     label: province,
     value: province,
-    children: (cityMap[province] || []).map(city => ({
+    children: (cityMap.value[province] || []).map(city => ({
       label: city,
       value: city
     }))
   }))
-];
+]);
 const cascaderProps: CascaderProps = {
   expandTrigger: 'hover',
   checkStrictly: false, // allow selecting parent (province) or child (city)
@@ -379,8 +417,7 @@ function updateChart(val: string) {
 }
 
 function handleMapCityChange(val: string[]) {
-  // 处理地图查看城市的变化
-  // 这里可以调用 renderMap() 或其他刷新逻辑
+  renderMap();
 }
 function handleStartCityChange(val: string[]) {
   // 处理起始城市的变化
@@ -615,10 +652,12 @@ watch(
 );
 
 onMounted(() => {
-  nextTick(() => {
-    initCharts();
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('resize', handleCubeResize);
+  loadCityData().then(() => {
+    nextTick(() => {
+      initCharts();
+      window.addEventListener('resize', handleResize);
+      window.addEventListener('resize', handleCubeResize);
+    });
   });
 });
 onBeforeUnmount(() => {
