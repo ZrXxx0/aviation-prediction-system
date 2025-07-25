@@ -249,7 +249,7 @@ const initCharts = () => {
 // 渲染地图
 const renderMap = () => {
   const option = {
-    backgroundColor: '#afddf1',
+    backgroundColor: '#c0dcef',
     tooltip: {
       trigger: 'item', formatter: (params) => {
         if (params.data && params.data.fromName) {
@@ -274,7 +274,7 @@ const renderMap = () => {
       label: {normal: {show: true, position: 'right', formatter: '{b}'}},
       symbolSize: 8,
       showEffectOn: 'render',
-      itemStyle: {normal: {color: '#46bee9'}},
+      itemStyle: {normal: {color: '#46e949'}},
       data: Object.keys(geoCoordMap).map(city => ({name: city, value: geoCoordMap[city]}))
     }, {
       name: '航线',
@@ -282,7 +282,7 @@ const renderMap = () => {
       coordinateSystem: 'geo',
       zlevel: 1,
       effect: {show: true, period: 4, trailLength: 0.02, symbol: 'arrow', symbolSize: 5},
-      lineStyle: {normal: {color: '#a6c84c', width: 1, opacity: 0.6, curveness: 0.2}},
+      lineStyle: {normal: {color: '#ffffff', width: 1, opacity: 0.6, curveness: 0.2}},
       data: convertData(datas)
     }]
   };
