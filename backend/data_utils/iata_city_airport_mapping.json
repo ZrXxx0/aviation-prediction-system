@@ -1,0 +1,1152 @@
+{
+  "AAT": {
+    "city": "阿勒泰",
+    "airport": "阿勒泰机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "ACX": {
+    "city": "黔西南",
+    "airport": "兴义机场",
+    "province": "贵州省"
+  },
+  "AEB": {
+    "city": "百色",
+    "airport": "百色巴马机场",
+    "province": "广西壮族自治区"
+  },
+  "AHJ": {
+    "city": "阿坝藏族羌族自治州",
+    "airport": "阿坝红原机场",
+    "province": "四川省"
+  },
+  "AKA": {
+    "city": "安康",
+    "airport": "安康五里铺机场",
+    "province": "陕西省"
+  },
+  "AKU": {
+    "city": "阿克苏",
+    "airport": "阿克苏机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "AOG": {
+    "city": "鞍山",
+    "airport": "鞍山腾鳌机场",
+    "province": "辽宁省"
+  },
+  "AQG": {
+    "city": "安庆",
+    "airport": "安庆天柱山机场",
+    "province": "安徽省"
+  },
+  "AVA": {
+    "city": "安顺",
+    "airport": "安顺黄果树机场",
+    "province": "贵州省"
+  },
+  "AXF": {
+    "city": "阿拉善左旗",
+    "airport": "阿拉善左旗巴彦浩特机场",
+    "province": "内蒙古自治区"
+  },
+  "BPE": {
+    "city": "秦皇岛",
+    "airport": "秦皇岛北戴河机场",
+    "province": "河北省"
+  },
+  "BAV": {
+    "city": "包头",
+    "airport": "包头二里半机场",
+    "province": "内蒙古自治区"
+  },
+  "BFJ": {
+    "city": "毕节",
+    "airport": "毕节飞雄机场",
+    "province": "贵州省"
+  },
+  "BHY": {
+    "city": "北海",
+    "airport": "北海福成机场",
+    "province": "广西壮族自治区"
+  },
+  "BPL": {
+    "city": "博尔塔拉",
+    "airport": "博乐阿拉山口机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "BPX": {
+    "city": "昌都",
+    "airport": "昌都邦达机场",
+    "province": "西藏自治区"
+  },
+  "BSD": {
+    "city": "隆阳",
+    "airport": "保山云瑞机场",
+    "province": "云南省"
+  },
+  "CAN": {
+    "city": "广州",
+    "airport": "广州白云国际机场",
+    "province": "广东省"
+  },
+  "CDE": {
+    "city": "承德",
+    "airport": "承德普宁机场",
+    "province": "河北省"
+  },
+  "CGD": {
+    "city": "常德",
+    "airport": "常德桃花源机场",
+    "province": "湖南省"
+  },
+  "CGO": {
+    "city": "郑州",
+    "airport": "郑州新郑国际机场",
+    "province": "河南省"
+  },
+  "CGQ": {
+    "city": "长春",
+    "airport": "长春龙嘉国际机场",
+    "province": "吉林省"
+  },
+  "CHG": {
+    "city": "朝阳",
+    "airport": "朝阳机场",
+    "province": "辽宁省"
+  },
+  "CIF": {
+    "city": "赤峰",
+    "airport": "赤峰玉龙机场",
+    "province": "内蒙古自治区"
+  },
+  "CIH": {
+    "city": "长治",
+    "airport": "长治王村机场",
+    "province": "山西省"
+  },
+  "CKG": {
+    "city": "重庆",
+    "airport": "重庆江北国际机场",
+    "province": "重庆市"
+  },
+  "CNI": {
+    "city": "长海",
+    "airport": "长海大长山岛机场",
+    "province": "辽宁省"
+  },
+  "CSX": {
+    "city": "长沙",
+    "airport": "长沙黄花国际机场",
+    "province": "湖南省"
+  },
+  "CTU": {
+    "city": "成都",
+    "airport": "成都双流国际机场",
+    "province": "四川省"
+  },
+  "CZX": {
+    "city": "常州",
+    "airport": "常州奔牛机场",
+    "province": "江苏省"
+  },
+  "DAT": {
+    "city": "大同",
+    "airport": "大同云冈机场",
+    "province": "山西省"
+  },
+  "DAX": {
+    "city": "达州",
+    "airport": "达州河市机场",
+    "province": "四川省"
+  },
+  "DCY": {
+    "city": "稻城",
+    "airport": "稻城亚丁机场",
+    "province": "四川省"
+  },
+  "DDG": {
+    "city": "丹东",
+    "airport": "丹东浪头机场",
+    "province": "辽宁省"
+  },
+  "DGM": {
+    "city": "东莞",
+    "airport": "东莞机场",
+    "province": "广东省"
+  },
+  "DIG": {
+    "city": "迪庆",
+    "airport": "迪庆香格里拉机场",
+    "province": "云南省"
+  },
+  "DLC": {
+    "city": "大连",
+    "airport": "大连周水子国际机场",
+    "province": "辽宁省"
+  },
+  "DLU": {
+    "city": "大理",
+    "airport": "大理机场",
+    "province": "云南省"
+  },
+  "DNH": {
+    "city": "敦煌",
+    "airport": "敦煌机场",
+    "province": "甘肃省"
+  },
+  "DOY": {
+    "city": "东营",
+    "airport": "东营胜利机场",
+    "province": "山东省"
+  },
+  "DQA": {
+    "city": "大庆",
+    "airport": "大庆萨尔图机场",
+    "province": "黑龙江省"
+  },
+  "DSN": {
+    "city": "鄂尔多斯",
+    "airport": "鄂尔多斯伊金霍洛机场",
+    "province": "内蒙古自治区"
+  },
+  "DYG": {
+    "city": "张家界",
+    "airport": "张家界荷花国际机场",
+    "province": "湖南省"
+  },
+  "EJN": {
+    "city": "额济纳旗",
+    "airport": "额济纳旗桃来机场",
+    "province": "内蒙古自治区"
+  },
+  "EHU": {
+    "city": "鄂州",
+    "airport": "鄂州花湖机场",
+    "province": "湖北省"
+  },
+  "ENH": {
+    "city": "恩施",
+    "airport": "恩施许家坪机场",
+    "province": "湖北省"
+  },
+  "ENY": {
+    "city": "延安",
+    "airport": "延安二十里堡机场",
+    "province": "陕西省"
+  },
+  "ERL": {
+    "city": "二连浩特",
+    "airport": "二连浩特赛乌苏机场",
+    "province": "内蒙古自治区"
+  },
+  "FOC": {
+    "city": "福州",
+    "airport": "福州长乐国际机场",
+    "province": "福建省"
+  },
+  "FUG": {
+    "city": "阜阳",
+    "airport": "阜阳西关机场",
+    "province": "安徽省"
+  },
+  "FUO": {
+    "city": "佛山",
+    "airport": "佛山机场",
+    "province": "广东省"
+  },
+  "FYJ": {
+    "city": "抚远",
+    "airport": "抚远东极机场",
+    "province": "黑龙江省"
+  },
+  "FYN": {
+    "city": "富蕴",
+    "airport": "富蕴机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "GHN": {
+    "city": "德阳",
+    "airport": "广汉机场",
+    "province": "四川省"
+  },
+  "GOQ": {
+    "city": "格尔木",
+    "airport": "格尔木机场",
+    "province": "青海省"
+  },
+  "GXH": {
+    "city": "甘南",
+    "airport": "甘南夏河机场",
+    "province": "甘肃省"
+  },
+  "GYS": {
+    "city": "广元",
+    "airport": "广元盘龙机场",
+    "province": "四川省"
+  },
+  "GYU": {
+    "city": "固原",
+    "airport": "固原六盘山机场",
+    "province": "宁夏回族自治区"
+  },
+  "HAK": {
+    "city": "海口",
+    "airport": "海口美兰国际机场",
+    "province": "海南省"
+  },
+  "HDG": {
+    "city": "邯郸",
+    "airport": "邯郸机场",
+    "province": "河北省"
+  },
+  "HEK": {
+    "city": "黑河",
+    "airport": "黑河机场",
+    "province": "黑龙江省"
+  },
+  "HET": {
+    "city": "呼和浩特",
+    "airport": "呼和浩特白塔国际机场",
+    "province": "内蒙古自治区"
+  },
+  "HFE": {
+    "city": "合肥",
+    "airport": "合肥新桥国际机场",
+    "province": "安徽省"
+  },
+  "HGH": {
+    "city": "杭州",
+    "airport": "杭州萧山国际机场",
+    "province": "浙江省"
+  },
+  "HIA": {
+    "city": "淮安",
+    "airport": "淮安涟水机场",
+    "province": "江苏省"
+  },
+  "HJJ": {
+    "city": "怀化",
+    "airport": "怀化芷江机场",
+    "province": "湖南省"
+  },
+  "HQL": {
+    "city": "塔什库尔干",
+    "airport": "塔什库尔干红其拉甫机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "HQQ": {
+    "city": "安阳",
+    "airport": "安阳红旗渠机场",
+    "province": "河南省"
+  },
+  "HKG": {
+    "city": "香港",
+    "airport": "香港国际机场",
+    "province": "香港特别行政区"
+  },
+  "HLD": {
+    "city": "呼伦贝尔",
+    "airport": "呼伦贝尔海拉尔机场",
+    "province": "内蒙古自治区"
+  },
+  "HLH": {
+    "city": "乌兰浩特",
+    "airport": "乌兰浩特机场",
+    "province": "内蒙古自治区"
+  },
+  "HNY": {
+    "city": "衡阳",
+    "airport": "衡阳南岳机场",
+    "province": "湖南省"
+  },
+  "HMI": {
+    "city": "哈密",
+    "airport": "哈密机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "HRB": {
+    "city": "哈尔滨",
+    "airport": "哈尔滨太平国际机场",
+    "province": "黑龙江省"
+  },
+  "HSC": {
+    "city": "韶关",
+    "airport": "韶关桂头机场",
+    "province": "广东省"
+  },
+  "HSN": {
+    "city": "舟山",
+    "airport": "舟山普陀山机场",
+    "province": "浙江省"
+  },
+  "HTN": {
+    "city": "和田",
+    "airport": "和田机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "HTT": {
+    "city": "海西",
+    "airport": "海西花土沟机场",
+    "province": "青海省"
+  },
+  "HUZ": {
+    "city": "惠州",
+    "airport": "惠州机场",
+    "province": "广东省"
+  },
+  "HYN": {
+    "city": "台州",
+    "airport": "台州路桥机场",
+    "province": "浙江省"
+  },
+  "HZA": {
+    "city": "菏泽",
+    "airport": "菏泽牡丹机场",
+    "province": "山东省"
+  },
+  "HZG": {
+    "city": "汉中",
+    "airport": "汉中西关机场",
+    "province": "陕西省"
+  },
+  "HZH": {
+    "city": "黎平",
+    "airport": "黎平机场",
+    "province": "贵州省"
+  },
+  "INC": {
+    "city": "银川",
+    "airport": "银川河东国际机场",
+    "province": "宁夏回族自治区"
+  },
+  "IQM": {
+    "city": "且末",
+    "airport": "且末机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "IQN": {
+    "city": "庆阳",
+    "airport": "庆阳机场",
+    "province": "甘肃省"
+  },
+  "JDZ": {
+    "city": "景德镇",
+    "airport": "景德镇罗家机场",
+    "province": "江西省"
+  },
+  "JGD": {
+    "city": "大兴安岭",
+    "airport": "加格达奇机场",
+    "province": "黑龙江省"
+  },
+  "JGN": {
+    "city": "嘉峪关",
+    "airport": "嘉峪关机场",
+    "province": "甘肃省"
+  },
+  "JGS": {
+    "city": "吉安",
+    "airport": "井冈山机场",
+    "province": "江西省"
+  },
+  "JHG": {
+    "city": "西双版纳",
+    "airport": "西双版纳嘎洒国际机场",
+    "province": "云南省"
+  },
+  "JIC": {
+    "city": "金昌",
+    "airport": "金昌金川机场",
+    "province": "甘肃省"
+  },
+  "JIL": {
+    "city": "吉林",
+    "airport": "吉林二台子机场",
+    "province": "吉林省"
+  },
+  "JIQ": {
+    "city": "黔江",
+    "airport": "黔江武陵山机场",
+    "province": "重庆市"
+  },
+  "JIU": {
+    "city": "九江",
+    "airport": "九江庐山机场",
+    "province": "江西省"
+  },
+  "JJN": {
+    "city": "泉州",
+    "airport": "泉州晋江机场",
+    "province": "福建省"
+  },
+  "JMU": {
+    "city": "佳木斯",
+    "airport": "佳木斯东郊机场",
+    "province": "黑龙江省"
+  },
+  "JNG": {
+    "city": "济宁",
+    "airport": "济宁曲阜机场",
+    "province": "山东省"
+  },
+  "JNZ": {
+    "city": "锦州",
+    "airport": "锦州小岭子机场",
+    "province": "辽宁省"
+  },
+  "JSJ": {
+    "city": "佳木斯",
+    "airport": "建三江湿地机场",
+    "province": "黑龙江省"
+  },
+  "JUH": {
+    "city": "池州",
+    "airport": "池州九华山机场",
+    "province": "安徽省"
+  },
+  "JUZ": {
+    "city": "衢州",
+    "airport": "衢州机场",
+    "province": "浙江省"
+  },
+  "JXA": {
+    "city": "鸡西",
+    "airport": "鸡西兴凯湖机场",
+    "province": "黑龙江省"
+  },
+  "JZH": {
+    "city": "九寨沟",
+    "airport": "九寨黄龙机场",
+    "province": "四川省"
+  },
+  "KCA": {
+    "city": "库车",
+    "airport": "库车龟兹机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "KGT": {
+    "city": "康定",
+    "airport": "甘孜康定机场",
+    "province": "四川省"
+  },
+  "KHG": {
+    "city": "喀什",
+    "airport": "喀什机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "KHH": {
+    "city": "高雄",
+    "airport": "高雄国际机场",
+    "province": "台湾省"
+  },
+  "KHN": {
+    "city": "南昌",
+    "airport": "南昌昌北国际机场",
+    "province": "江西省"
+  },
+  "KJH": {
+    "city": "黔东南",
+    "airport": "凯里黄平机场",
+    "province": "贵州省"
+  },
+  "KJI": {
+    "city": "布尔津",
+    "airport": "布尔津喀纳斯机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "KMG": {
+    "city": "昆明",
+    "airport": "昆明长水国际机场",
+    "province": "云南省"
+  },
+  "KOW": {
+    "city": "赣州",
+    "airport": "赣州黄金机场",
+    "province": "江西省"
+  },
+  "KRL": {
+    "city": "库尔勒",
+    "airport": "库尔勒机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "KRY": {
+    "city": "克拉玛依",
+    "airport": "克拉玛依机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "KWE": {
+    "city": "贵阳",
+    "airport": "贵阳龙洞堡国际机场",
+    "province": "贵州省"
+  },
+  "KWL": {
+    "city": "桂林",
+    "airport": "桂林两江国际机场",
+    "province": "广西壮族自治区"
+  },
+  "LCX": {
+    "city": "龙岩",
+    "airport": "连城冠豸山机场",
+    "province": "福建省"
+  },
+  "LFQ": {
+    "city": "临汾",
+    "airport": "临汾尧都机场",
+    "province": "山西省"
+  },
+  "LDS": {
+    "city": "伊春",
+    "airport": "伊春林都机场",
+    "province": "黑龙江省"
+  },
+  "LHW": {
+    "city": "兰州",
+    "airport": "兰州中川机场",
+    "province": "甘肃省"
+  },
+  "LJG": {
+    "city": "丽江",
+    "airport": "丽江三义机场",
+    "province": "云南省"
+  },
+  "LLB": {
+    "city": "黔南",
+    "airport": "荔波机场",
+    "province": "贵州省"
+  },
+  "LLF": {
+    "city": "永州",
+    "airport": "永州零陵机场",
+    "province": "湖南省"
+  },
+  "LLV": {
+    "city": "吕梁",
+    "airport": "吕梁机场",
+    "province": "山西省"
+  },
+  "LNJ": {
+    "city": "临沧",
+    "airport": "临沧机场",
+    "province": "云南省"
+  },
+  "LUM": {
+    "city": "德宏",
+    "airport": "德宏芒市机场",
+    "province": "云南省"
+  },
+  "LXA": {
+    "city": "拉萨",
+    "airport": "拉萨贡嘎机场",
+    "province": "西藏自治区"
+  },
+  "LYA": {
+    "city": "洛阳",
+    "airport": "洛阳北郊机场",
+    "province": "河南省"
+  },
+  "LYG": {
+    "city": "连云港",
+    "airport": "连云港白塔埠机场",
+    "province": "江苏省"
+  },
+  "LYI": {
+    "city": "临沂",
+    "airport": "临沂沭埠岭机场",
+    "province": "山东省"
+  },
+  "LZH": {
+    "city": "柳州",
+    "airport": "柳州白莲机场",
+    "province": "广西壮族自治区"
+  },
+  "LZO": {
+    "city": "泸州",
+    "airport": "泸州蓝田机场",
+    "province": "四川省"
+  },
+  "LZY": {
+    "city": "林芝",
+    "airport": "林芝米林机场",
+    "province": "西藏自治区"
+  },
+  "MDG": {
+    "city": "牡丹江",
+    "airport": "牡丹江海浪机场",
+    "province": "黑龙江省"
+  },
+  "MFM": {
+    "city": "澳门",
+    "airport": "澳门国际机场",
+    "province": "澳门特别行政区"
+  },
+  "MIG": {
+    "city": "绵阳",
+    "airport": "绵阳南郊机场",
+    "province": "四川省"
+  },
+  "MXZ": {
+    "city": "梅州",
+    "airport": "梅县长岗岌机场",
+    "province": "广东省"
+  },
+  "NAO": {
+    "city": "南充",
+    "airport": "南充高坪机场",
+    "province": "四川省"
+  },
+  "NAY": {
+    "city": "北京",
+    "airport": "北京南苑机场",
+    "province": "北京市"
+  },
+  "NBS": {
+    "city": "白山",
+    "airport": "长白山机场",
+    "province": "吉林省"
+  },
+  "NDG": {
+    "city": "齐齐哈尔",
+    "airport": "齐齐哈尔三家子机场",
+    "province": "黑龙江省"
+  },
+  "NGB": {
+    "city": "宁波",
+    "airport": "宁波栎社国际机场",
+    "province": "浙江省"
+  },
+  "NGQ": {
+    "city": "阿里",
+    "airport": "阿里昆莎机场",
+    "province": "西藏自治区"
+  },
+  "NKG": {
+    "city": "南京",
+    "airport": "南京禄口国际机场",
+    "province": "江苏省"
+  },
+  "NLT": {
+    "city": "新源",
+    "airport": "新源那拉提机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "NNG": {
+    "city": "南宁",
+    "airport": "南宁吴圩国际机场",
+    "province": "广西壮族自治区"
+  },
+  "NNY": {
+    "city": "南阳",
+    "airport": "南阳姜营机场",
+    "province": "河南省"
+  },
+  "NTG": {
+    "city": "南通",
+    "airport": "南通兴东机场",
+    "province": "江苏省"
+  },
+  "NZH": {
+    "city": "满洲里",
+    "airport": "满洲里西郊机场",
+    "province": "内蒙古自治区"
+  },
+  "OHE": {
+    "city": "漠河",
+    "airport": "漠河古莲机场",
+    "province": "黑龙江省"
+  },
+  "PEK": {
+    "city": "北京",
+    "airport": "北京首都国际机场",
+    "province": "北京市"
+  },
+  "PKX": {
+    "city": "北京",
+    "airport": "北京大兴国际机场",
+    "province": "北京市"
+  },
+  "PVG": {
+    "city": "上海",
+    "airport": "上海浦东国际机场",
+    "province": "上海市"
+  },
+  "PZI": {
+    "city": "攀枝花",
+    "airport": "攀枝花保安营机场",
+    "province": "四川省"
+  },
+  "RHT": {
+    "city": "阿拉善右旗",
+    "airport": "阿拉善右旗巴丹吉林机场",
+    "province": "内蒙古自治区"
+  },
+  "RKZ": {
+    "city": "日喀则",
+    "airport": "日喀则和平机场",
+    "province": "西藏自治区"
+  },
+  "RLK": {
+    "city": "巴彦淖尔",
+    "airport": "巴彦淖尔天吉泰机场",
+    "province": "内蒙古自治区"
+  },
+  "RMQ": {
+    "city": "台中",
+    "airport": "台中清泉岗机场",
+    "province": "台湾省"
+  },
+  "SHA": {
+    "city": "上海",
+    "airport": "上海虹桥国际机场",
+    "province": "上海市"
+  },
+  "SHE": {
+    "city": "沈阳",
+    "airport": "沈阳桃仙国际机场",
+    "province": "辽宁省"
+  },
+  "SHF": {
+    "city": "石河子",
+    "airport": "石河子花园机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "SHP": {
+    "city": "秦皇岛",
+    "airport": "秦皇岛山海关机场",
+    "province": "河北省"
+  },
+  "SHS": {
+    "city": "荆州",
+    "airport": "荆州沙市机场",
+    "province": "湖北省"
+  },
+  "SJW": {
+    "city": "石家庄",
+    "airport": "石家庄正定国际机场",
+    "province": "河北省"
+  },
+  "SQJ": {
+    "city": "沙县",
+    "airport": "三明沙县机场",
+    "province": "福建省"
+  },
+  "SUN": {
+    "city": "遂宁",
+    "airport": "遂宁机场",
+    "province": "四川省"
+  },
+  "SWA": {
+    "city": "揭阳",
+    "airport": "揭阳潮汕机场",
+    "province": "广东省"
+  },
+  "SYM": {
+    "city": "普洱",
+    "airport": "普洱思茅机场",
+    "province": "云南省"
+  },
+  "SYX": {
+    "city": "三亚",
+    "airport": "三亚凤凰国际机场",
+    "province": "海南省"
+  },
+  "SZX": {
+    "city": "深圳",
+    "airport": "深圳宝安国际机场",
+    "province": "广东省"
+  },
+  "SZV": {
+    "city": "苏州",
+    "airport": "苏州光福机场",
+    "province": "江苏省"
+  },
+  "TAO": {
+    "city": "青岛",
+    "airport": "青岛流亭国际机场",
+    "province": "山东省"
+  },
+  "TCG": {
+    "city": "塔城",
+    "airport": "塔城机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "TCZ": {
+    "city": "腾冲",
+    "airport": "腾冲驼峰机场",
+    "province": "云南省"
+  },
+  "TEN": {
+    "city": "铜仁",
+    "airport": "铜仁凤凰机场",
+    "province": "贵州省"
+  },
+  "TFU": {
+    "city": "成都",
+    "airport": "成都天府国际机场",
+    "province": "四川省"
+  },
+  "TGO": {
+    "city": "通辽",
+    "airport": "通辽机场",
+    "province": "内蒙古自治区"
+  },
+  "THQ": {
+    "city": "天水",
+    "airport": "天水麦积山机场",
+    "province": "甘肃省"
+  },
+  "TLQ": {
+    "city": "吐鲁番",
+    "airport": "吐鲁番交河机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "TNA": {
+    "city": "济南",
+    "airport": "济南遥墙国际机场",
+    "province": "山东省"
+  },
+  "TNH": {
+    "city": "通化",
+    "airport": "通化三源浦机场",
+    "province": "吉林省"
+  },
+  "TPE": {
+    "city": "桃园",
+    "airport": "桃园国际机场",
+    "province": "台湾省"
+  },
+  "TSA": {
+    "city": "台北",
+    "airport": "台北松山机场",
+    "province": "台湾省"
+  },
+  "TSN": {
+    "city": "天津",
+    "airport": "天津滨海国际机场",
+    "province": "天津市"
+  },
+  "TVS": {
+    "city": "唐山",
+    "airport": "唐山三女河机场",
+    "province": "河北省"
+  },
+  "TXN": {
+    "city": "黄山",
+    "airport": "黄山屯溪机场",
+    "province": "安徽省"
+  },
+  "TYN": {
+    "city": "太原",
+    "airport": "太原武宿国际机场",
+    "province": "山西省"
+  },
+  "URC": {
+    "city": "乌鲁木齐",
+    "airport": "乌鲁木齐地窝堡国际机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "UYN": {
+    "city": "榆林",
+    "airport": "榆林榆阳机场",
+    "province": "陕西省"
+  },
+  "WEF": {
+    "city": "潍坊",
+    "airport": "潍坊机场",
+    "province": "山东省"
+  },
+  "WEH": {
+    "city": "威海",
+    "airport": "威海国际机场",
+    "province": "山东省"
+  },
+  "WNH": {
+    "city": "文山",
+    "airport": "文山普者黑机场",
+    "province": "云南省"
+  },
+  "WNZ": {
+    "city": "温州",
+    "airport": "温州龙湾国际机场",
+    "province": "浙江省"
+  },
+  "WUA": {
+    "city": "乌海",
+    "airport": "乌海机场",
+    "province": "内蒙古自治区"
+  },
+  "WUH": {
+    "city": "武汉",
+    "airport": "武汉天河国际机场",
+    "province": "湖北省"
+  },
+  "WUS": {
+    "city": "南平",
+    "airport": "武夷山机场",
+    "province": "福建省"
+  },
+  "WUX": {
+    "city": "无锡",
+    "airport": "苏南硕放国际机场",
+    "province": "江苏省"
+  },
+  "WUZ": {
+    "city": "梧州",
+    "airport": "梧州长洲岛机场",
+    "province": "广西壮族自治区"
+  },
+  "WXN": {
+    "city": "万州",
+    "airport": "万州五桥机场",
+    "province": "重庆市"
+  },
+  "XFN": {
+    "city": "襄阳",
+    "airport": "襄阳刘集机场",
+    "province": "湖北省"
+  },
+  "XIA": {
+    "city": "信阳",
+    "airport": "信阳明港机场",
+    "province": "河南省"
+  },
+  "XIC": {
+    "city": "西昌",
+    "airport": "西昌青山机场",
+    "province": "四川省"
+  },
+  "XIL": {
+    "city": "锡林浩特",
+    "airport": "锡林浩特机场",
+    "province": "内蒙古自治区"
+  },
+  "XIY": {
+    "city": "西安",
+    "airport": "西安咸阳国际机场",
+    "province": "陕西省"
+  },
+  "XMN": {
+    "city": "厦门",
+    "airport": "厦门高崎国际机场",
+    "province": "福建省"
+  },
+  "XNN": {
+    "city": "西宁",
+    "airport": "西宁曹家堡机场",
+    "province": "青海省"
+  },
+  "XNT": {
+    "city": "邢台",
+    "airport": "邢台褡裢机场",
+    "province": "河北省"
+  },
+  "XUZ": {
+    "city": "徐州",
+    "airport": "徐州观音机场",
+    "province": "江苏省"
+  },
+  "YBP": {
+    "city": "宜宾",
+    "airport": "宜宾菜坝机场",
+    "province": "四川省"
+  },
+  "YCU": {
+    "city": "运城",
+    "airport": "运城机场",
+    "province": "山西省"
+  },
+  "YIC": {
+    "city": "宜春",
+    "airport": "宜春明月山机场",
+    "province": "江西省"
+  },
+  "YIE": {
+    "city": "阿尔山",
+    "airport": "阿尔山伊尔施机场",
+    "province": "内蒙古自治区"
+  },
+  "YIH": {
+    "city": "宜昌",
+    "airport": "宜昌三峡机场",
+    "province": "湖北省"
+  },
+  "YIN": {
+    "city": "伊宁",
+    "airport": "伊宁机场",
+    "province": "新疆维吾尔自治区"
+  },
+  "YIW": {
+    "city": "金华",
+    "airport": "义乌机场",
+    "province": "浙江省"
+  },
+  "YKH": {
+    "city": "营口",
+    "airport": "营口兰旗机场",
+    "province": "辽宁省"
+  },
+  "YNJ": {
+    "city": "延边",
+    "airport": "延吉朝阳川机场",
+    "province": "吉林省"
+  },
+  "YNT": {
+    "city": "烟台",
+    "airport": "烟台莱山国际机场",
+    "province": "山东省"
+  },
+  "YNZ": {
+    "city": "盐城",
+    "airport": "盐城南洋机场",
+    "province": "江苏省"
+  },
+  "YTY": {
+    "city": "扬州",
+    "airport": "扬州泰州机场",
+    "province": "江苏省"
+  },
+  "YUS": {
+    "city": "玉树",
+    "airport": "玉树巴塘机场",
+    "province": "青海省"
+  },
+  "YYA": {
+    "city": "岳阳",
+    "airport": "岳阳三荷机场",
+    "province": "湖南省"
+  },
+  "YZY": {
+    "city": "张掖",
+    "airport": "张掖甘州机场",
+    "province": "甘肃省"
+  },
+  "ZAT": {
+    "city": "昭通",
+    "airport": "昭通机场",
+    "province": "云南省"
+  },
+  "ZHA": {
+    "city": "湛江",
+    "airport": "湛江机场",
+    "province": "广东省"
+  },
+  "ZHY": {
+    "city": "中卫",
+    "airport": "中卫沙坡头机场",
+    "province": "宁夏回族自治区"
+  },
+  "ZQZ": {
+    "city": "张家口",
+    "airport": "张家口宁远机场",
+    "province": "河北省"
+  },
+  "ZUH": {
+    "city": "珠海",
+    "airport": "珠海金湾机场",
+    "province": "广东省"
+  },
+  "ZYI": {
+    "city": "遵义",
+    "airport": "遵义新舟机场",
+    "province": "贵州省"
+  }
+}
