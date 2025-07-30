@@ -68,25 +68,26 @@
                 :props="cascaderProps"
                 @change="handleEndCityChange"
                 clearable
-                style="width: 40%"
+                style="width: 40%; margin-right: 20px"
             ></el-cascader>
+            <el-button type="primary" :icon="Search" circle @click="handleSearch" />
           </div>
         </div>
 
         <div class="stats-cards">
           <div class="stat-card">
             <h3>🛫 总运力</h3>
-            <div class="value">1,258,000</div>
+            <div class="value">{{ filteredStats.capacity.toLocaleString() }}</div>
             <div class="unit">人次/月</div>
           </div>
           <div class="stat-card">
             <h3>🛩️ 总运量</h3>
-            <div class="value">982,000</div>
+            <div class="value">{{ filteredStats.volume.toLocaleString() }}</div>
             <div class="unit">人次/月</div>
           </div>
           <div class="stat-card">
             <h3>🛫 航班数量</h3>
-            <div class="value">1,280</div>
+            <div class="value">{{ filteredStats.flights.toLocaleString() }}</div>
             <div class="unit">班次/月</div>
           </div>
         </div>
@@ -111,14 +112,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed } from 'vue';
+import { ref, onMounted, onBeforeUnmount, watch, nextTick, computed, reactive } from 'vue';
 import type { ElSelect, ElOption, CascaderOption, CascaderProps } from 'element-plus';
+import {Search} from '@element-plus/icons-vue'
 import { Decoration1 , Decoration7 } from 'datav-vue3';
 import * as echarts from 'echarts';
 import chinaMap from '@/assets/china.json';
 import * as XLSX from 'xlsx';
 
-echarts.registerMap('china', chinaMap);
+echarts.registerMap('china', chinaMap as any);
 
 
 const selectedDate = ref('2023-07');
@@ -129,6 +131,19 @@ const selectedStatType = ref('capacity');
 const provinces = ref(['北京', '上海', '广东', '江苏', '浙江', '四川', '山东', '河南', '湖北', '湖南']);
 const cityMap = ref<Record<string, string[]>>({});
 const geoCoordMap = ref<Record<string, [number, number]>>({});
+
+// 查询结果统计数据（默认全国）
+const filteredStats = reactive({
+  capacity: 1258000,
+  volume: 982000,
+  flights: 1280
+});
+// 查询结果趋势数据（默认全国）
+const filteredTrendData = reactive({
+  capacity: [1258, 1120, 980, 865, 790, 720, 680, 650, 620, 590, 560, 530],
+  volume: [982, 860, 745, 680, 610, 580, 520, 490, 460, 430, 400, 370],
+  flights: [128, 112, 98, 85, 76, 70, 65, 60, 55, 50, 45, 40]
+});
 
 async function loadCityData() {
   const response = await fetch('/src/assets/城市经纬度.xlsx');
@@ -283,7 +298,7 @@ const renderMap = () => {
       zoom: 1.2,
       label: {emphasis: {show: false}},
       roam: true,
-      itemStyle: {normal: {areaColor: '#323c48', borderColor: '#404a59'}, emphasis: {areaColor: '#2a333d'}}
+      itemStyle: {normal: {areaColor: '#323c48', borderColor: '#4e5667'}, emphasis: {areaColor: '#2a333d'}}
     },
     series: [
       {
@@ -425,6 +440,49 @@ function handleStartCityChange(val: string[]) {
 function handleEndCityChange(val: string[]) {
   // 处理终点城市的变化
 }
+
+function handleSearch() {
+  // 获取选中的起始城市和终点城市
+  const start = selectedStartCity.value && selectedStartCity.value.length > 1
+    ? selectedStartCity.value[1]
+    : (selectedStartCity.value && selectedStartCity.value.length === 1 ? selectedStartCity.value[0] : '');
+  const end = selectedEndCity.value && selectedEndCity.value.length > 1
+    ? selectedEndCity.value[1]
+    : (selectedEndCity.value && selectedEndCity.value.length === 1 ? selectedEndCity.value[0] : '');
+
+  // 筛选航线数据
+  let filtered = datas;
+  if (start && end) {
+    filtered = datas.filter(d => d[0].name === start && d[1].name === end);
+  } else if (start) {
+    filtered = datas.filter(d => d[0].name === start);
+  } else if (end) {
+    filtered = datas.filter(d => d[1].name === end);
+  }
+
+  // 统计数据
+  let totalCapacity = 0;
+  let totalVolume = 0;
+  let totalFlights = 0;
+  filtered.forEach(d => {
+    totalCapacity += d[1].value || 0;
+    totalVolume += d[1].value || 0;
+    totalFlights += 1;
+  });
+
+  // 更新统计卡片
+  filteredStats.capacity = totalCapacity * 1000; // 假设1 value = 1000人次
+  filteredStats.volume = totalVolume * 800;      // 假设1 value = 800人次
+  filteredStats.flights = totalFlights;
+
+  // 更新趋势数据（这里用随机数模拟，实际可用后端返回或本地生成）
+  filteredTrendData.capacity = generateMonthlyData(totalCapacity || 1000);
+  filteredTrendData.volume = generateMonthlyData(totalVolume || 800);
+  filteredTrendData.flights = generateMonthlyData(totalFlights || 10);
+
+  // 刷新柱状图
+  renderCubeBarChart();
+}
 // 生命周期钩子
 const statTypeLabelMap: Record<string, string> = {
   capacity: '运力',
@@ -454,7 +512,11 @@ const registerCustomShapes = () => {
       const c1 = [shape.x - offsetX, shape.y - offsetY];
       const c2 = [xAxisPoint[0] - offsetX, xAxisPoint[1] - offsetY];
       const c3 = [xAxisPoint[0], xAxisPoint[1]];
-      ctx.moveTo(c0[0], c0[1]).lineTo(c1[0], c1[1]).lineTo(c2[0], c2[1]).lineTo(c3[0], c3[1]).closePath();
+      ctx.moveTo(c0[0], c0[1]);
+      ctx.lineTo(c1[0], c1[1]);
+      ctx.lineTo(c2[0], c2[1]);
+      ctx.lineTo(c3[0], c3[1]);
+      ctx.closePath();
     }
   });
   // 右侧面
@@ -466,7 +528,11 @@ const registerCustomShapes = () => {
       const c2 = [xAxisPoint[0], xAxisPoint[1]];
       const c3 = [xAxisPoint[0] + offsetX, xAxisPoint[1] - offsetY];
       const c4 = [shape.x + offsetX, shape.y - offsetY];
-      ctx.moveTo(c1[0], c1[1]).lineTo(c2[0], c2[1]).lineTo(c3[0], c3[1]).lineTo(c4[0], c4[1]).closePath();
+      ctx.moveTo(c1[0], c1[1]);
+      ctx.lineTo(c2[0], c2[1]);
+      ctx.lineTo(c3[0], c3[1]);
+      ctx.lineTo(c4[0], c4[1]);
+      ctx.closePath();
     }
   });
   // 顶面
@@ -477,7 +543,11 @@ const registerCustomShapes = () => {
       const c2 = [shape.x + offsetX, shape.y - offsetY];
       const c3 = [shape.x, shape.y - offsetX];
       const c4 = [shape.x - offsetX, shape.y - offsetY];
-      ctx.moveTo(c1[0], c1[1]).lineTo(c2[0], c2[1]).lineTo(c3[0], c3[1]).lineTo(c4[0], c4[1]).closePath();
+      ctx.moveTo(c1[0], c1[1]);
+      ctx.lineTo(c2[0], c2[1]);
+      ctx.lineTo(c3[0], c3[1]);
+      ctx.lineTo(c4[0], c4[1]);
+      ctx.closePath();
     }
   });
 
@@ -500,10 +570,26 @@ const generateRandomData = (max: number) => {
   return Array.from({ length: 12 }, () => Math.floor(Math.random() * (max * 0.8)) + Math.floor(max * 0.2));
 };
 
+// 生成12个月的模拟数据
+const generateMonthlyData = (baseValue: number) => {
+  return Array.from({ length: 12 }, (_, index) => {
+    // 模拟季节性变化，夏季和节假日期间数据较高
+    const seasonalFactor = 1 + 0.3 * Math.sin((index - 2) * Math.PI / 6); // 6月(索引5)为峰值
+    const randomFactor = 0.8 + Math.random() * 0.4; // 0.8-1.2的随机因子
+    return Math.floor(baseValue * seasonalFactor * randomFactor);
+  });
+};
+
 const statMaxMap = {
   capacity: 1500,
   volume: 1200,
   flights: 200
+};
+
+// 获取当前统计类型的最大值
+const getCurrentMax = () => {
+  const data = filteredTrendData[selectedStatType.value];
+  return Math.max(...data);
 };
 
 const renderCubeBarChart = () => {
@@ -515,9 +601,9 @@ const renderCubeBarChart = () => {
   cubeChartInstance = echarts.init(cubeChartRef.value);
 
   const months = getLast12Months();
-  const max = statMaxMap[selectedStatType.value];
-  const MAX = Array(12).fill(max);
-  const VALUE = generateRandomData(max);
+  const currentMax = getCurrentMax();
+  const MAX = Array(12).fill(currentMax);
+  const VALUE = filteredTrendData[selectedStatType.value];
 
   const option = {
     backgroundColor: 'transparent',
@@ -725,7 +811,7 @@ body {
 
 .filters {
   display: flex;
-  gap: 20px;
+  gap: 10px;
   margin-bottom: 10px;
   flex-wrap: wrap;
   flex-direction: row; 
