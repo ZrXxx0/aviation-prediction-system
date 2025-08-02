@@ -16,8 +16,10 @@
                 v-model="selectedDate"
                 type="month"
                 placeholder="选择年月"
-                value-format="yyyy-MM"
+                format="YYYY 年 MM 月"
+                value-format="YYYY-MM"
                 @change="updateChart"
+                @input="(val) => console.log('时间选择器输入:', val)"
                 style="width: 40%"
             ></el-date-picker>
           </div>
@@ -53,7 +55,6 @@
                 v-model="selectedStartCity"
                 :options="locationOptions"
                 :props="cascaderProps"
-                @change="handleStartCityChange"
                 clearable
                 style="width: 40%"
             ></el-cascader>
@@ -66,7 +67,6 @@
                 v-model="selectedEndCity"
                 :options="locationOptions"
                 :props="cascaderProps"
-                @change="handleEndCityChange"
                 clearable
                 style="width: 40%; margin-right: 20px"
             ></el-cascader>
@@ -119,11 +119,11 @@ import { Decoration1 , Decoration7 } from 'datav-vue3';
 import * as echarts from 'echarts';
 import chinaMap from '@/assets/china.json';
 import * as XLSX from 'xlsx';
+import apiConfig from '@/config/api.js';
 
 echarts.registerMap('china', chinaMap as any);
 
-
-const selectedDate = ref('2023-07');
+const selectedDate = ref('2024-05'); // 默认2024年5月
 const selectedMapCity = ref([''] as string[]); // 地图查看城市
 const selectedStartCity = ref([''] as string[]); // 起始城市
 const selectedEndCity = ref([''] as string[]); // 终点城市
@@ -132,18 +132,110 @@ const provinces = ref(['北京', '上海', '广东', '江苏', '浙江', '四川
 const cityMap = ref<Record<string, string[]>>({});
 const geoCoordMap = ref<Record<string, [number, number]>>({});
 
+// 航线数据
+const routeData = ref<any[]>([]);
+
 // 查询结果统计数据（默认全国）
 const filteredStats = reactive({
-  capacity: 1258000,
-  volume: 982000,
-  flights: 1280
+  capacity: 0,
+  volume: 0,
+  flights: 0
 });
 // 查询结果趋势数据（默认全国）
 const filteredTrendData = reactive({
-  capacity: [1258, 1120, 980, 865, 790, 720, 680, 650, 620, 590, 560, 530],
-  volume: [982, 860, 745, 680, 610, 580, 520, 490, 460, 430, 400, 370],
-  flights: [128, 112, 98, 85, 76, 70, 65, 60, 55, 50, 45, 40]
+  months: [],
+  capacity: [],
+  volume: [],
+  flights: []
 });
+
+// 获取航线分布数据
+const fetchRouteDistribution = async (yearMonth: string, city?: string) => {
+  try {
+    console.log('🔍 发送请求参数:', { yearMonth, city });
+    const params = new URLSearchParams({ year_month: yearMonth });
+    if (city) params.append('city', city);
+    
+    const url = apiConfig.getUrl(apiConfig.endpoints.SHOW.ROUTES) + `?${params}`;
+    console.log('🔍 请求URL:', url);
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    
+    // 转换数据格式为前端需要的格式
+    const convertedData = data.map((item: any) => [
+      { name: item.from },
+      { name: item.to, value: item.flights }
+    ]);
+    
+    routeData.value = convertedData;
+    console.log('✅ 成功获取航线数据:', routeData.value.length, '条记录');
+  } catch (error) {
+    console.error('❌ 获取航线数据失败:', error);
+    // 如果API失败，使用默认数据
+    routeData.value = defaultRouteData;
+    console.log('📊 使用默认航线数据:', routeData.value.length, '条记录');
+  }
+};
+
+// API调用函数
+const fetchStatisticsSummary = async (yearMonth: string, startCity?: string, endCity?: string) => {
+  try {
+    const params = new URLSearchParams({ year_month: yearMonth });
+    if (startCity) params.append('start_city', startCity);
+    if (endCity) params.append('end_city', endCity);
+    
+    const response = await fetch(apiConfig.getUrl(apiConfig.endpoints.SHOW.STATISTICS_SUMMARY) + `?${params}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    
+    filteredStats.capacity = data.capacity || 0;
+    filteredStats.volume = data.volume || 0;
+    filteredStats.flights = data.flights || 0;
+    console.log('✅ 成功获取统计数据:', filteredStats);
+  } catch (error) {
+    console.error('❌ 获取统计数据失败:', error);
+    // 设置默认统计数据
+    filteredStats.capacity = 1500000;
+    filteredStats.volume = 1200000;
+    filteredStats.flights = 15000;
+    console.log('📊 使用默认统计数据:', filteredStats);
+  }
+};
+
+const fetchStatisticsTrend = async (yearMonth: string, startCity?: string, endCity?: string) => {
+  try {
+    const params = new URLSearchParams({ year_month: yearMonth });
+    if (startCity) params.append('start_city', startCity);
+    if (endCity) params.append('end_city', endCity);
+    
+    const response = await fetch(apiConfig.getUrl(apiConfig.endpoints.SHOW.STATISTICS_TREND) + `?${params}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    
+    filteredTrendData.months = data.months || [];
+    filteredTrendData.capacity = data.capacity || [];
+    filteredTrendData.volume = data.volume || [];
+    filteredTrendData.flights = data.flights || [];
+    console.log('✅ 成功获取趋势数据:', filteredTrendData);
+  } catch (error) {
+    console.error('❌ 获取趋势数据失败:', error);
+    // 设置默认趋势数据
+    const months = getLast12Months();
+    filteredTrendData.months = months;
+    filteredTrendData.capacity = generateRandomData(1500);
+    filteredTrendData.volume = generateRandomData(1200);
+    filteredTrendData.flights = generateRandomData(200);
+    console.log('📊 使用默认趋势数据:', filteredTrendData);
+  }
+};
 
 async function loadCityData() {
   const response = await fetch('/src/assets/城市经纬度.xlsx');
@@ -176,10 +268,9 @@ const currentDate = ref(new Date().toLocaleDateString('zh-CN', {
 }));
 // ECharts实例
 const mapChart = ref(null);
-const barChart = ref(null);
 // 地理坐标数据
-// 航线数据
-const datas = [[{name: '上海'}, {name: '北京', value: 322}],
+// 默认航线数据（当API失败时使用）
+const defaultRouteData = [[{name: '上海'}, {name: '北京', value: 322}],
   [{name: '上海'}, {name: '广州', value: 350}],
   [{name: '北京'}, {name: '上海', value: 210}],
   [{name: '北京'}, {name: '广州', value: 188}],
@@ -235,28 +326,52 @@ const convertData = (data) => {
 };
 // 初始化图表
 const initCharts = () => {
-  mapChart.value = echarts.init(document.getElementById('map-chart'));
-  renderMap();
-  barChart.value = echarts.init(document.getElementById('bar-chart'));
-  renderBarChart();
+  console.log('📊 开始初始化图表...');
+  
+  // 检查DOM元素是否存在
+  const mapElement = document.getElementById('map-chart');
+  
+  if (!mapElement) {
+    console.error('❌ 地图容器元素不存在');
+    return false;
+  }
+  
+  try {
+    // 初始化地图图表
+    mapChart.value = echarts.init(mapElement);
+    console.log('✅ 地图图表初始化成功');
+    
+    return true;
+  } catch (error) {
+    console.error('❌ 图表初始化失败:', error);
+    return false;
+  }
 };
 // 渲染地图
 const renderMap = () => {
+  console.log('🗺️ 开始渲染地图...');
+  
   // 获取当前选择的城市
   let city = selectedMapCity.value && selectedMapCity.value.length > 1
     ? selectedMapCity.value[1]
     : (selectedMapCity.value && selectedMapCity.value.length === 1 ? selectedMapCity.value[0] : '');
 
-  // 过滤航线数据
-  let filteredDatas = datas;
+  // 使用从API获取的航线数据
+  let filteredDatas = routeData.value || [];
   if (city && city !== '') {
-    filteredDatas = datas.filter(d => d[0].name === city);
+    filteredDatas = (routeData.value || []).filter(d => d[0].name === city);
   }
+
+  console.log('📊 地图数据:', {
+    totalRoutes: filteredDatas.length,
+    selectedCity: city,
+    hasData: filteredDatas.length > 0
+  });
 
   // 有航线的城市
   const flightCities = new Set(filteredDatas.flatMap(d => [d[0].name, d[1].name]));
   // 所有城市
-  const allCities = Object.keys(geoCoordMap.value);
+  const allCities = Object.keys(geoCoordMap.value || {});
 
   const allCityData = allCities.map(city => ({
     name: city,
@@ -339,64 +454,22 @@ const renderMap = () => {
         data: convertData(filteredDatas)
       }]
   };
-  mapChart.value.setOption(option);
+  if (mapChart.value) {
+    try {
+      mapChart.value.setOption(option);
+      console.log('✅ 地图渲染完成');
+    } catch (error) {
+      console.error('❌ 地图渲染失败:', error);
+    }
+  } else {
+    console.error('❌ 地图图表实例不存在');
+  }
 };
-// 渲染柱状图
-const renderBarChart = () => {
-  // 模拟不同统计类型的数据
-  const data = {
-    capacity: [1258, 1120, 980, 865, 790, 720, 680],
-    volume: [982, 860, 745, 680, 610, 580, 520],
-    flights: [128, 112, 98, 85, 76, 70, 65]
-  };
-  const option = {
-    backgroundColor: 'rgba(10, 20, 40, 0.3)',
-    tooltip: {trigger: 'axis', axisPointer: {type: 'shadow'}},
-    grid: {left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true},
-    xAxis: {
-      type: 'category',
-      data: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-      axisLine: {lineStyle: {color: '#7cb9e8'}},
-      axisLabel: {color: '#fff'}
-    },
-    yAxis: {
-      type: 'value',
-      name: selectedStatType.value === 'capacity' ? '运力(吨)' : selectedStatType.value === 'volume' ? '运量(吨)' : '航班数量',
-      nameTextStyle: {color: '#7cb9e8'},
-      axisLine: {lineStyle: {color: '#7cb9e8'}},
-      axisLabel: {color: '#fff'},
-      splitLine: {lineStyle: {color: 'rgba(124, 185, 232, 0.2)'}}
-    },
-    series: [{
-      name: selectedStatType.value === 'capacity' ? '运力' : selectedStatType.value === 'volume' ? '运量' : '航班数',
-      type: 'bar',
-      barWidth: '60%',
-      data: data[selectedStatType.value],
-      itemStyle: {
-        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{offset: 0, color: '#83bff6'}, {
-          offset: 0.5,
-          color: '#188df0'
-        }, {offset: 1, color: '#188df0'}])
-      },
-      emphasis: {
-        itemStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{
-            offset: 0,
-            color: '#2378f7'
-          }, {offset: 0.7, color: '#2378f7'}, {offset: 1, color: '#83bff6'}])
-        }
-      }
-    }]
-  };
-  barChart.value.setOption(option);
-};
+
 // 处理窗口大小变化
 const handleResize = () => {
   if (mapChart.value) {
     mapChart.value.resize();
-  }
-  if (barChart.value) {
-    barChart.value.resize();
   }
 };
 // Cascader options for province/city
@@ -426,22 +499,72 @@ function handleLocationChange(val: string[]) {
   // Example: console.log('Location changed:', val)
 }
 
-function updateChart(val: string) {
-  // 这里可以调用 renderMap() 或其他刷新逻辑
+async function updateChart(val: string) {
+  console.log('🔍 updateChart 被调用，时间值:', val);
+  
+  // 获取当前选中的城市
+  const city = selectedMapCity.value && selectedMapCity.value.length > 1
+    ? selectedMapCity.value[1]
+    : (selectedMapCity.value && selectedMapCity.value.length === 1 ? selectedMapCity.value[0] : '');
+  
+  // 使用传递的时间值，如果没有则使用selectedDate.value
+  const timeValue = val || selectedDate.value;
+  console.log('🔍 使用的时间值:', timeValue);
+  
+  // 获取航线数据
+  await fetchRouteDistribution(timeValue, city);
+  
+  // 更新地图
   renderMap();
+  
+  // 获取当前选中的城市
+  const start = selectedStartCity.value && selectedStartCity.value.length > 1
+    ? selectedStartCity.value[1]
+    : (selectedStartCity.value && selectedStartCity.value.length === 1 ? selectedStartCity.value[0] : '');
+  const end = selectedEndCity.value && selectedEndCity.value.length > 1
+    ? selectedEndCity.value[1]
+    : (selectedEndCity.value && selectedEndCity.value.length === 1 ? selectedEndCity.value[0] : '');
+  
+  // 更新统计数据
+  await fetchStatisticsSummary(timeValue, start, end);
+  await fetchStatisticsTrend(timeValue, start, end);
+  renderCubeBarChart();
 }
 
 function handleMapCityChange(val: string[]) {
-  renderMap();
+  // 获取选中的城市
+  const city = val && val.length > 1 ? val[1] : (val && val.length === 1 ? val[0] : '');
+  
+  // 重新获取航线数据并更新地图
+  fetchRouteDistribution(selectedDate.value, city).then(() => {
+    renderMap();
+  });
 }
-function handleStartCityChange(val: string[]) {
+async function handleStartCityChange(val: string[]) {
   // 处理起始城市的变化
-}
-function handleEndCityChange(val: string[]) {
-  // 处理终点城市的变化
+  const start = val && val.length > 1 ? val[1] : (val && val.length === 1 ? val[0] : '');
+  const end = selectedEndCity.value && selectedEndCity.value.length > 1
+    ? selectedEndCity.value[1]
+    : (selectedEndCity.value && selectedEndCity.value.length === 1 ? selectedEndCity.value[0] : '');
+  
+  await fetchStatisticsSummary(selectedDate.value, start, end);
+  await fetchStatisticsTrend(selectedDate.value, start, end);
+  renderCubeBarChart();
 }
 
-function handleSearch() {
+async function handleEndCityChange(val: string[]) {
+  // 处理终点城市的变化
+  const end = val && val.length > 1 ? val[1] : (val && val.length === 1 ? val[0] : '');
+  const start = selectedStartCity.value && selectedStartCity.value.length > 1
+    ? selectedStartCity.value[1]
+    : (selectedStartCity.value && selectedStartCity.value.length === 1 ? selectedStartCity.value[0] : '');
+  
+  await fetchStatisticsSummary(selectedDate.value, start, end);
+  await fetchStatisticsTrend(selectedDate.value, start, end);
+  renderCubeBarChart();
+}
+
+async function handleSearch() {
   // 获取选中的起始城市和终点城市
   const start = selectedStartCity.value && selectedStartCity.value.length > 1
     ? selectedStartCity.value[1]
@@ -450,35 +573,9 @@ function handleSearch() {
     ? selectedEndCity.value[1]
     : (selectedEndCity.value && selectedEndCity.value.length === 1 ? selectedEndCity.value[0] : '');
 
-  // 筛选航线数据
-  let filtered = datas;
-  if (start && end) {
-    filtered = datas.filter(d => d[0].name === start && d[1].name === end);
-  } else if (start) {
-    filtered = datas.filter(d => d[0].name === start);
-  } else if (end) {
-    filtered = datas.filter(d => d[1].name === end);
-  }
-
-  // 统计数据
-  let totalCapacity = 0;
-  let totalVolume = 0;
-  let totalFlights = 0;
-  filtered.forEach(d => {
-    totalCapacity += d[1].value || 0;
-    totalVolume += d[1].value || 0;
-    totalFlights += 1;
-  });
-
-  // 更新统计卡片
-  filteredStats.capacity = totalCapacity * 1000; // 假设1 value = 1000人次
-  filteredStats.volume = totalVolume * 800;      // 假设1 value = 800人次
-  filteredStats.flights = totalFlights;
-
-  // 更新趋势数据（这里用随机数模拟，实际可用后端返回或本地生成）
-  filteredTrendData.capacity = generateMonthlyData(totalCapacity || 1000);
-  filteredTrendData.volume = generateMonthlyData(totalVolume || 800);
-  filteredTrendData.flights = generateMonthlyData(totalFlights || 10);
+  // 调用API获取统计数据
+  await fetchStatisticsSummary(selectedDate.value, start, end);
+  await fetchStatisticsTrend(selectedDate.value, start, end);
 
   // 刷新柱状图
   renderCubeBarChart();
@@ -570,15 +667,7 @@ const generateRandomData = (max: number) => {
   return Array.from({ length: 12 }, () => Math.floor(Math.random() * (max * 0.8)) + Math.floor(max * 0.2));
 };
 
-// 生成12个月的模拟数据
-const generateMonthlyData = (baseValue: number) => {
-  return Array.from({ length: 12 }, (_, index) => {
-    // 模拟季节性变化，夏季和节假日期间数据较高
-    const seasonalFactor = 1 + 0.3 * Math.sin((index - 2) * Math.PI / 6); // 6月(索引5)为峰值
-    const randomFactor = 0.8 + Math.random() * 0.4; // 0.8-1.2的随机因子
-    return Math.floor(baseValue * seasonalFactor * randomFactor);
-  });
-};
+
 
 const statMaxMap = {
   capacity: 1500,
@@ -589,6 +678,7 @@ const statMaxMap = {
 // 获取当前统计类型的最大值
 const getCurrentMax = () => {
   const data = filteredTrendData[selectedStatType.value];
+  if (!data || data.length === 0) return 100; // 默认最大值
   return Math.max(...data);
 };
 
@@ -600,10 +690,13 @@ const renderCubeBarChart = () => {
 
   cubeChartInstance = echarts.init(cubeChartRef.value);
 
-  const months = getLast12Months();
+  // 使用后端返回的月份数据，如果没有则使用默认的12个月
+  const months = filteredTrendData.months && filteredTrendData.months.length > 0 
+    ? filteredTrendData.months 
+    : getLast12Months();
   const currentMax = getCurrentMax();
-  const MAX = Array(12).fill(currentMax);
-  const VALUE = filteredTrendData[selectedStatType.value];
+  const MAX = Array(months.length).fill(currentMax);
+  const VALUE = filteredTrendData[selectedStatType.value] || Array(months.length).fill(0);
 
   const option = {
     backgroundColor: 'transparent',
@@ -737,14 +830,65 @@ watch(
   { immediate: true }
 );
 
-onMounted(() => {
-  loadCityData().then(() => {
-    nextTick(() => {
-      initCharts();
-      window.addEventListener('resize', handleResize);
-      window.addEventListener('resize', handleCubeResize);
-    });
-  });
+onMounted(async () => {
+  console.log('🚀 页面开始初始化...');
+  
+  try {
+    // 1. 首先加载城市数据
+    await loadCityData();
+    console.log('✅ 城市数据加载完成');
+    
+    // 2. 等待DOM完全渲染
+    await nextTick();
+    // 额外等待一小段时间确保DOM完全准备好
+    await new Promise(resolve => setTimeout(resolve, 100));
+    console.log('✅ DOM更新完成');
+    
+    // 3. 初始化图表
+    const chartsInitialized = initCharts();
+    if (!chartsInitialized) {
+      console.error('❌ 图表初始化失败，尝试延迟初始化...');
+      // 如果初始化失败，延迟重试
+      await new Promise(resolve => setTimeout(resolve, 500));
+      const retryResult = initCharts();
+      if (!retryResult) {
+        console.error('❌ 图表初始化最终失败');
+        return;
+      }
+    }
+    console.log('✅ 图表初始化完成');
+    
+    // 4. 添加窗口大小监听
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('resize', handleCubeResize);
+    
+    // 5. 加载默认数据（全国数据）
+    console.log('📊 开始加载默认数据...');
+    
+    // 并行加载所有数据
+    await Promise.all([
+      fetchRouteDistribution(selectedDate.value),
+      fetchStatisticsSummary(selectedDate.value),
+      fetchStatisticsTrend(selectedDate.value)
+    ]);
+    
+    console.log('✅ 所有数据加载完成');
+    
+    // 6. 渲染图表
+    renderMap();
+    renderCubeBarChart();
+    
+    console.log('✅ 图表渲染完成');
+  } catch (error) {
+    console.error('❌ 页面初始化过程中出现错误:', error);
+    // 即使出错也要尝试渲染默认数据
+    try {
+      renderMap();
+      renderCubeBarChart();
+    } catch (renderError) {
+      console.error('❌ 渲染默认数据也失败:', renderError);
+    }
+  }
 });
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize);
@@ -753,6 +897,31 @@ onBeforeUnmount(() => {
 });
 watch(() => selectedStatType.value, () => {
   nextTick(() => renderCubeBarChart());
+});
+
+// 监听时间变化，重新获取数据
+watch(() => selectedDate.value, async (newVal, oldVal) => {
+  console.log('🔍 selectedDate 发生变化:', { oldVal, newVal });
+  
+  // 获取当前选中的城市
+  const city = selectedMapCity.value && selectedMapCity.value.length > 1
+    ? selectedMapCity.value[1]
+    : (selectedMapCity.value && selectedMapCity.value.length === 1 ? selectedMapCity.value[0] : '');
+  
+  // 重新获取航线数据
+  await fetchRouteDistribution(newVal, city);
+  renderMap();
+  
+  const start = selectedStartCity.value && selectedStartCity.value.length > 1
+    ? selectedStartCity.value[1]
+    : (selectedStartCity.value && selectedStartCity.value.length === 1 ? selectedStartCity.value[0] : '');
+  const end = selectedEndCity.value && selectedEndCity.value.length > 1
+    ? selectedEndCity.value[1]
+    : (selectedEndCity.value && selectedEndCity.value.length === 1 ? selectedEndCity.value[0] : '');
+  
+  await fetchStatisticsSummary(newVal, start, end);
+  await fetchStatisticsTrend(newVal, start, end);
+  renderCubeBarChart();
 });
 </script>
 
