@@ -1,5 +1,5 @@
 from django.db import models
-from model_registry.model_registry import get_model
+# from .model_registry.model_registry import get_model  # 临时注释，避免pandas导入问题
 # Create your models here.
 
 # 城市经济信息
@@ -46,9 +46,11 @@ class MLModel(models.Model):
         unique_together = ("name", "granularity", "parameters")
 
     def build_sklearn_model(self):
-        model = get_model(self.granularity, self.name)
-        model.set_params(**self.parameters)
-        return model
+        # 临时注释，避免pandas导入问题
+        # model = get_model(self.granularity, self.name)
+        # model.set_params(**self.parameters)
+        # return model
+        raise NotImplementedError("模型构建功能暂时不可用，需要解决pandas依赖问题")
 
     def __str__(self):
         return f"{self.name}-{self.granularity}"

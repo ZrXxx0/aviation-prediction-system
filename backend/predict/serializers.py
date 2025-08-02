@@ -1,5 +1,6 @@
 from rest_framework import serializers
-import models
+from . import models
+from show.models import RouteMonthlyStat
 
 class MacroEconomicIndicatorSerializer(serializers.ModelSerializer):
     class Meta:
@@ -23,5 +24,5 @@ class FlightStatRecordSerializer(serializers.ModelSerializer):
 
 class RouteMonthlyStatSerializer(serializers.ModelSerializer):
     class Meta:
-        model = models.RouteMonthlyStat
+        model = RouteMonthlyStat
         fields = '__all__'

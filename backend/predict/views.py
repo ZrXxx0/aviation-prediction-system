@@ -2,7 +2,8 @@ from django.shortcuts import render
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from .models import MacroEconomicIndicator, FlightStatRecord, PredictionRecord, RouteMonthlyStat
+from .models import MacroEconomicIndicator, FlightStatRecord, PredictionRecord
+from show.models import RouteMonthlyStat
 from .serializers import MacroEconomicIndicatorSerializer, PredictionRecordSerializer, RouteMonthlyStatSerializer
 from django.db.models import Sum
 

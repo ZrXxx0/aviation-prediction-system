@@ -79,4 +79,4 @@ def import_bulk(csv_path, batch_size=1000):
     print(f"🎉 批量导入完成，总成功：{success_count} 条，失败：{len(failed_rows)} 条")
 
 if __name__ == "__main__":
-    import_bulk("D:/desk/Airlinepredict/aviation-prediction/final_data_0622.csv", batch_size=1000)
+    import_bulk("./final_data_0729.csv", batch_size=1000)
