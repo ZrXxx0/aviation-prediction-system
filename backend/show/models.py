@@ -25,3 +25,12 @@ class RouteMonthlyStat(models.Model):
 
     def __str__(self):
         return f"{self.origin_code} → {self.destination_code} - {self.year}-{self.month:02d}"
+
+class AirportInfo(models.Model):
+    code = models.CharField(max_length=3, unique=True)  # IATA 三字码唯一
+    city = models.CharField(max_length=100)
+    airport = models.CharField(max_length=200)
+    province = models.CharField(max_length=100)
+
+    def __str__(self):
+        return f"{self.city} - {self.airport} ({self.code})"
