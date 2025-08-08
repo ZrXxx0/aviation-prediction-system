@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from .models import RouteMonthlyStat, AirportInfo
 from .serializers import  RouteMonthlyStatSerializer
-from django.db.models import Sum, Q
+from django.db.models import Sum, Q, Count
 from django.core.exceptions import ObjectDoesNotExist
 import os
 import json
@@ -56,6 +56,14 @@ def get_city_airport(iata_code):
 # 获取航线分布数据
 @api_view(['GET'])
 def route_distribution_view(request):
+    """
+    获取航线分布数据的优化版本
+    主要优化点：
+    1. 使用values()减少内存使用
+    2. 批量获取机场信息避免N+1查询
+    3. 只处理有航班数的数据
+    4. 使用更高效的数据结构
+    """
     year_month = request.GET.get("year_month")
     city = request.GET.get("city")  # 可为空
     print(f"🔍 接收到的参数 - year_month: {year_month}, city: {city}")
@@ -82,48 +90,19 @@ def route_distribution_view(request):
         print(f"❌ 时间参数解析失败: {e}")
         return Response({"error": "year_month 格式应为 YYYY-MM，如 2024-06"}, status=400)
 
-    qs = RouteMonthlyStat.objects.filter(year=year, month=month)
-    print(f"🔍 查询条件: year={year}, month={month}, 查询结果数量: {qs.count()}")
-
     # 情况一：指定起始城市
     if city:
         origin_codes = get_codes_by_city(city)
         if not origin_codes:
             return Response({"error": f"找不到城市 {city} 的三字码"}, status=404)
-        qs = qs.filter(origin_code__in=origin_codes)
+        
+        qs = RouteMonthlyStat.objects.filter(
+            year=year, 
+            month=month, 
+            origin_code__in=origin_codes
+        )
         print(f"🔍 筛选城市 {city}，机场代码: {origin_codes}")
 
-        # 嵌套结构：城市对 -> { "flights": 总航班量, "detail": [] }
-        city_pair_data = defaultdict(lambda: {"flights": 0, "detail": []})
-
-        for item in qs:
-            from_info = build_info(item.origin_code)
-            to_info = build_info(item.destination_code)
-            flights = item.Route_Total_Flights or 0
-
-            key = (from_info["city"], to_info["city"])
-            city_pair_data[key]["flights"] += flights
-            city_pair_data[key]["detail"].append({
-                "from_airport": from_info["airport"],  # 用 build_info 的机场名
-                "to_airport": to_info["airport"],
-                "flights": flights
-            })
-
-        # 转成列表并排序
-        result = [
-            {
-                "from": from_city,
-                "to": to_city,
-                "flights": data["flights"],  # 这个城市对的航班量
-                "detail": sorted(data["detail"], key=lambda x: x["flights"], reverse=True)
-            }
-            for (from_city, to_city), data in city_pair_data.items()
-        ]
-
-        result = sorted(result, key=lambda x: x["flights"], reverse=True)[:100]
-
-    # 情况二：不指定城市，聚合所有城市对
-    else:
         # 嵌套结构：城市对 -> { "flights": 总航班量, "detail": [] }
         city_pair_data = defaultdict(lambda: {"flights": 0, "detail": []})
 
@@ -145,15 +124,106 @@ def route_distribution_view(request):
             {
                 "from": from_city,
                 "to": to_city,
-                "flights": data["flights"],  # 这个城市对的航班量
+                "flights": data["flights"],
                 "detail": sorted(data["detail"], key=lambda x: x["flights"], reverse=True)
             }
             for (from_city, to_city), data in city_pair_data.items()
         ]
-        # 筛选前100条
+
         result = sorted(result, key=lambda x: x["flights"], reverse=True)[:100]
 
-    # print(f"✅ 返回航线数据: {len(result)} 条记录")
+    # 情况二：不指定城市，聚合所有城市对 - 高度优化版本
+    else:
+        print("🚀 使用高度优化查询模式...")
+        
+        # 第一步：使用values()一次性获取所有需要的字段，减少内存使用
+        # 只获取有航班数的数据，减少处理量
+        route_data = list(RouteMonthlyStat.objects.filter(
+            year=year, 
+            month=month,
+            Route_Total_Flights__gt=0  # 只获取有航班的数据
+        ).values('origin_code', 'destination_code', 'Route_Total_Flights'))
+        
+        print(f"🔍 获取到 {len(route_data)} 条有效航线数据")
+        
+        if not route_data:
+            print("⚠️ 没有找到有效数据")
+            return Response([])
+        
+        # 第二步：批量获取所有相关的机场信息
+        airport_codes = set()
+        for item in route_data:
+            if item['origin_code']:
+                airport_codes.add(item['origin_code'])
+            if item['destination_code']:
+                airport_codes.add(item['destination_code'])
+        
+        # 批量获取机场信息到内存，避免N+1查询
+        airport_info_map = {}
+        if airport_codes:
+            airports = AirportInfo.objects.filter(code__in=airport_codes)
+            for airport in airports:
+                airport_info_map[airport.code] = {
+                    "code": airport.code,
+                    "city": airport.city,
+                    "province": airport.province,
+                    "airport": airport.airport
+                }
+        
+        print(f"🔍 批量获取了 {len(airport_info_map)} 个机场信息")
+        
+        # 第三步：使用更高效的数据结构进行聚合
+        city_pair_aggregates = defaultdict(int)
+        city_pair_details = defaultdict(list)
+        
+        # 使用更高效的数据处理方式
+        for item in route_data:
+            # 从内存中获取机场信息
+            from_info = airport_info_map.get(item['origin_code'], {
+                "code": item['origin_code'],
+                "city": None,
+                "province": None,
+                "airport": None
+            })
+            to_info = airport_info_map.get(item['destination_code'], {
+                "code": item['destination_code'],
+                "city": None,
+                "province": None,
+                "airport": None
+            })
+            
+            flights = item['Route_Total_Flights'] or 0
+            if flights > 0:
+                key = (from_info["city"], to_info["city"])
+                city_pair_aggregates[key] += flights
+                city_pair_details[key].append({
+                    "from_airport": from_info["airport"],
+                    "to_airport": to_info["airport"],
+                    "flights": flights
+                })
+
+        # 第四步：构建结果并排序（只取前100个）
+        sorted_pairs = sorted(
+            city_pair_aggregates.items(), 
+            key=lambda x: x[1], 
+            reverse=True
+        )[:100]
+        
+        result = [
+            {
+                "from": from_city,
+                "to": to_city,
+                "flights": total_flights,
+                "detail": sorted(
+                    city_pair_details[(from_city, to_city)], 
+                    key=lambda x: x["flights"], 
+                    reverse=True
+                )
+            }
+            for (from_city, to_city), total_flights in sorted_pairs
+        ]
+
+    print(f"✅ 返回航线数据: {len(result)} 条记录")
     return Response(result)
 
 # 获取统计卡片数据
