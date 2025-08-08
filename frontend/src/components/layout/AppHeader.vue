@@ -12,7 +12,6 @@
     >
       <el-menu-item index="/dashboard">数据看板</el-menu-item>
       <el-menu-item index="/forecast">预测分析</el-menu-item>
-      <el-menu-item index="/datamanage">数据管理</el-menu-item>
     </el-menu>
     <el-dropdown class="user-section" trigger="click">
       <span class="el-dropdown-link">

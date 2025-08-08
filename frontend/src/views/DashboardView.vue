@@ -132,8 +132,10 @@ const provinces = ref(['北京', '上海', '广东', '江苏', '浙江', '四川
 const cityMap = ref<Record<string, string[]>>({});
 const geoCoordMap = ref<Record<string, [number, number]>>({});
 
-// 航线数据
+// 航线数据 - 保存完整的后端返回数据
 const routeData = ref<any[]>([]);
+// 转换后的航线数据 - 用于地图显示
+const convertedRouteData = ref<any[]>([]);
 
 // 查询结果统计数据（默认全国）
 const filteredStats = reactive({
@@ -165,19 +167,32 @@ const fetchRouteDistribution = async (yearMonth: string, city?: string) => {
     }
     const data = await response.json();
     
-    // 转换数据格式为前端需要的格式
+    // 保存完整的后端数据
+    routeData.value = data;
+    
+    // 转换数据格式为前端地图需要的格式
+    // 后端返回格式: [{from: "上海", to: "北京", flights: 322, detail: [...]}]
+    // 前端需要格式: [[{name: "上海"}, {name: "北京", value: 322}]]
     const convertedData = data.map((item: any) => [
       { name: item.from },
       { name: item.to, value: item.flights }
     ]);
     
-    routeData.value = convertedData;
+    convertedRouteData.value = convertedData;
     console.log('✅ 成功获取航线数据:', routeData.value.length, '条记录');
   } catch (error) {
     console.error('❌ 获取航线数据失败:', error);
     // 如果API失败，使用默认数据
     routeData.value = defaultRouteData;
-    console.log('📊 使用默认航线数据:', routeData.value.length, '条记录');
+    
+    // 转换默认数据格式为前端地图需要的格式
+    const convertedData = defaultRouteData.map((item: any) => [
+      { name: item.from },
+      { name: item.to, value: item.flights }
+    ]);
+    
+    convertedRouteData.value = convertedData;
+    console.log('📊 使用默认航线数据:', convertedRouteData.value.length, '条记录');
   }
 };
 
@@ -269,42 +284,128 @@ const currentDate = ref(new Date().toLocaleDateString('zh-CN', {
 // ECharts实例
 const mapChart = ref(null);
 // 地理坐标数据
-// 默认航线数据（当API失败时使用）
-const defaultRouteData = [[{name: '上海'}, {name: '北京', value: 322}],
-  [{name: '上海'}, {name: '广州', value: 350}],
-  [{name: '北京'}, {name: '上海', value: 210}],
-  [{name: '北京'}, {name: '广州', value: 188}],
-  [{name: '北京'}, {name: '成都', value: 196}],
-  [{name: '广州'}, {name: '上海', value: 104}],
-  [{name: '广州'}, {name: '北京', value: 238}],
-  [{name: '广州'}, {name: '成都', value: 282}],
-  [{name: '成都'}, {name: '北京', value: 196}],
-  [{name: '成都'}, {name: '广州', value: 48}],
-  [{name: '深圳'}, {name: '北京', value: 156}],
-  [{name: '深圳'}, {name: '上海', value: 210}],
-  [{name: '杭州'}, {name: '广州', value: 126}],
-  [{name: '重庆'}, {name: '北京', value: 42}],
-  [{name: '武汉'}, {name: '广州', value: 98}],
-  [{name: '西安'}, {name: '北京', value: 162}],
-  [{name: '天津'}, {name: '广州', value: 130}],
-  [{name: '郑州'}, {name: '北京', value: 143}],
-  [{name: '长沙'}, {name: '广州', value: 145}],
-  [{name: '昆明'}, {name: '北京', value: 84}],
-  [{name: '乌鲁木齐'}, {name: '北京', value: 140}],
-  [{name: '哈尔滨'}, {name: '北京', value: 570}],
-  [{name: '青岛'}, {name: '上海', value: 134}],
-  [{name: '厦门'}, {name: '北京', value: 56}],
-  [{name: '三亚'}, {name: '北京', value: 56}],
-  [{name: '南京'}, {name: '深圳', value: 120}],
-  [{name: '南京'}, {name: '成都', value: 90}],
-  [{name: '合肥'}, {name: '上海', value: 80}],
-  [{name: '合肥'}, {name: '广州', value: 70}],
-  [{name: '厦门'}, {name: '成都', value: 60}],
-  [{name: '青岛'}, {name: '深圳', value: 110}],
-  [{name: '西安'}, {name: '杭州', value: 95}],
-  [{name: '重庆'}, {name: '南京', value: 85}],
-  [{name: '长沙'}, {name: '合肥', value: 75}],
-  [{name: '哈尔滨'}, {name: '成都', value: 65}],
+// 默认航线数据（当API失败时使用）- 符合后端返回格式
+const defaultRouteData = [
+  {
+    from: "上海",
+    to: "北京",
+    flights: 322,
+    detail: [
+      {
+        from_airport: "上海虹桥国际机场",
+        to_airport: "北京首都国际机场",
+        flights: 322
+      }
+    ]
+  },
+  {
+    from: "上海",
+    to: "广州",
+    flights: 350,
+    detail: [
+      {
+        from_airport: "上海虹桥国际机场",
+        to_airport: "广州白云国际机场",
+        flights: 350
+      }
+    ]
+  },
+  {
+    from: "北京",
+    to: "上海",
+    flights: 210,
+    detail: [
+      {
+        from_airport: "北京首都国际机场",
+        to_airport: "上海虹桥国际机场",
+        flights: 210
+      }
+    ]
+  },
+  {
+    from: "北京",
+    to: "广州",
+    flights: 188,
+    detail: [
+      {
+        from_airport: "北京首都国际机场",
+        to_airport: "广州白云国际机场",
+        flights: 188
+      }
+    ]
+  },
+  {
+    from: "北京",
+    to: "成都",
+    flights: 196,
+    detail: [
+      {
+        from_airport: "北京首都国际机场",
+        to_airport: "成都双流国际机场",
+        flights: 196
+      }
+    ]
+  },
+  {
+    from: "广州",
+    to: "上海",
+    flights: 104,
+    detail: [
+      {
+        from_airport: "广州白云国际机场",
+        to_airport: "上海虹桥国际机场",
+        flights: 104
+      }
+    ]
+  },
+  {
+    from: "广州",
+    to: "北京",
+    flights: 238,
+    detail: [
+      {
+        from_airport: "广州白云国际机场",
+        to_airport: "北京首都国际机场",
+        flights: 238
+      }
+    ]
+  },
+  {
+    from: "广州",
+    to: "成都",
+    flights: 282,
+    detail: [
+      {
+        from_airport: "广州白云国际机场",
+        to_airport: "成都双流国际机场",
+        flights: 282
+      }
+    ]
+  },
+  {
+    from: "深圳",
+    to: "北京",
+    flights: 156,
+    detail: [
+      {
+        from_airport: "深圳宝安国际机场",
+        to_airport: "北京首都国际机场",
+        flights: 156
+      }
+    ]
+  },
+  {
+    from: "杭州",
+    to: "广州",
+    flights: 126,
+    detail: [
+      {
+        from_airport: "杭州萧山国际机场",
+        to_airport: "广州白云国际机场",
+        flights: 126
+      }
+    ]
+  },
 ];
 // 转换航线数据
 const convertData = (data) => {
@@ -314,11 +415,17 @@ const convertData = (data) => {
     const fromCoord = geoCoordMap.value[dataItem[0].name];
     const toCoord = geoCoordMap.value[dataItem[1].name];
     if (fromCoord && toCoord) {
+      // 查找对应的完整数据
+      const fullData = routeData.value.find(item => 
+        item.from === dataItem[0].name && item.to === dataItem[1].name
+      );
+      
       res.push({
         fromName: dataItem[0].name,
         toName: dataItem[1].name,
         coords: [fromCoord, toCoord],
-        value: dataItem[1].value
+        value: dataItem[1].value,
+        detail: fullData ? fullData.detail : []
       });
     }
   }
@@ -357,9 +464,9 @@ const renderMap = () => {
     : (selectedMapCity.value && selectedMapCity.value.length === 1 ? selectedMapCity.value[0] : '');
 
   // 使用从API获取的航线数据
-  let filteredDatas = routeData.value || [];
+  let filteredDatas = convertedRouteData.value || [];
   if (city && city !== '') {
-    filteredDatas = (routeData.value || []).filter(d => d[0].name === city);
+    filteredDatas = (convertedRouteData.value || []).filter(d => d[0].name === city);
   }
 
   console.log('📊 地图数据:', {
@@ -401,9 +508,41 @@ const renderMap = () => {
   const option = {
     backgroundColor: '#c0dcef',
     tooltip: {
-      trigger: 'item', formatter: (params) => {
+      trigger: 'item', 
+      formatter: (params) => {
         if (params.data && params.data.fromName) {
-          return `${params.data.fromName} → ${params.data.toName}<br/>航班量: ${params.data.value}`;
+          // 航线数据
+          let tooltipContent = `
+            <div style="padding: 8px;">
+              <div style="font-weight: bold; margin-bottom: 8px; color: #333;">
+                <span style="color: #1890ff;">起始城市：</span>${params.data.fromName}
+              </div>
+              <div style="font-weight: bold; margin-bottom: 8px; color: #333;">
+                <span style="color: #1890ff;">终点城市：</span>${params.data.toName}
+              </div>
+              <div style="font-weight: bold; margin-bottom: 8px; color: #333;">
+                <span style="color: #1890ff;">总航班数：</span>${params.data.value}
+              </div>
+          `;
+          
+          // 如果有详细信息，添加详情信息
+          if (params.data.detail && params.data.detail.length > 0) {
+            tooltipContent += `
+              <div style="font-weight: bold; margin-bottom: 4px; color: #333;">
+                <span style="color: #1890ff;">详情信息：</span>
+              </div>
+            `;
+            params.data.detail.forEach((detailItem, index) => {
+              tooltipContent += `
+                <div style="margin-left: 8px; margin-bottom: 2px; color: #666;">
+                  &#8226; ${detailItem.from_airport || '未知机场'} - ${detailItem.to_airport || '未知机场'} ${detailItem.flights || 0}
+                </div>
+              `;
+            });
+          }
+          
+          tooltipContent += '</div>';
+          return tooltipContent;
         }
         return params.name;
       }
