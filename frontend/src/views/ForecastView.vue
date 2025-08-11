@@ -3,88 +3,98 @@
     <div class="forecast-content">
       <!-- 左侧控制面板 -->
       <div class="control-panel">
-        <h2>预测参数设置</h2>
+        <h2 class="panel-title">预测参数设置</h2>
 
         <div class="form-group">
           <label>预测时间粒度</label>
-          <select v-model="timeRange">
-            <option>年度</option>
-            <option>季度</option>
-            <option>月度</option>
-          </select>
+          <el-select v-model="timeRange" placeholder="选择时间粒度" class="large-select">
+            <el-option label="年度" value="年度" />
+            <el-option label="季度" value="季度" />
+            <el-option label="月度" value="月度" />
+          </el-select>
         </div>
 
-        <div class="form-group">
-          <label>预测时间长度</label>
-          <input type="number" v-model="numFeatures" min="1" />
+        <div class="form-group small-input">
+          <label>预测时间长度（预测部分长度）</label>
+          <el-input-number v-model="numFeatures" :min="1" :controls="false" class="small-number" />
         </div>
 
         <div class="form-group">
           <label>选择模型</label>
-          <select v-model="modelType">
-            <option value="ARIMA">ARIMA</option>
-            <option value="LSTM">LSTM</option>
-            <option value="Prophet">Prophet</option>
-          </select>
+          <el-select v-model="modelType" placeholder="选择模型" class="large-select">
+            <el-option label="选择最优模型" value="选择最优模型" />
+            <el-option label="ARIMA" value="ARIMA" />
+            <el-option label="LSTM" value="LSTM" />
+            <el-option label="Prophet" value="Prophet" />
+          </el-select>
         </div>
 
         <div class="form-group">
           <label>选择起点</label>
-          <select v-model="selectedFrom">
-            <option disabled value="">请选择</option>
-            <option v-for="city in cities" :key="'from-' + city">{{ city }}</option>
-          </select>
+          <el-select v-model="selectedFrom" placeholder="请选择起点" class="large-select">
+            <el-option
+              v-for="city in cities"
+              :key="'from-' + city"
+              :label="city"
+              :value="city"
+            />
+          </el-select>
         </div>
 
         <div class="form-group">
           <label>选择终点</label>
-          <select v-model="selectedTo">
-            <option disabled value="">请选择</option>
-            <option v-for="city in cities" :key="'to-' + city">{{ city }}</option>
-          </select>
+          <el-select v-model="selectedTo" placeholder="请选择终点" class="large-select">
+            <el-option
+              v-for="city in cities"
+              :key="'to-' + city"
+              :label="city"
+              :value="city"
+            />
+          </el-select>
         </div>
 
-        <button class="run-btn" @click="addRoute">添加航线</button>
+        <!-- 按钮行 -->
+        <div class="button-row">
+          <el-button type="primary" class="run-btn" @click="addRoute">添加航线</el-button>
+          <el-button type="success" class="run-btn" @click="runForecast">运行预测</el-button>
+        </div>
 
         <div class="route-list" v-if="routes.length">
           <h3>已选航线</h3>
           <ul>
             <li v-for="(route, index) in routes" :key="index">
               {{ route.from }} → {{ route.to }}
-              <button class="delete-btn" @click="removeRoute(index)">删除</button>
+              <el-button type="danger" size="mini" @click="removeRoute(index)" class="delete-btn">删除</el-button>
             </li>
           </ul>
         </div>
-
-        <button class="run-btn" @click="runForecast">运行预测</button>
       </div>
 
       <!-- 右侧图表和结果 -->
       <div class="result-area">
+        <div class="chart-header">
+          <el-checkbox v-model="showTrain">显示训练数据 (train)</el-checkbox>
+        </div>
         <div class="chart-area" ref="chartRef"></div>
 
-        <div class="stat-card" v-if="performanceTable.length">
+        <div class="stat-card">
           <h3>预测性能指标</h3>
-          <table class="performance-table">
-            <thead>
-              <tr>
-                <th>航线</th>
-                <th>模型</th>
-                <th>R²</th>
-                <th>MAPE (%)</th>
-                <th>RMSE</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="(row, index) in performanceTable" :key="index">
-                <td>{{ row.route }}</td>
-                <td>{{ row.model }}</td>
-                <td>{{ row.r2 }}</td>
-                <td>{{ row.mape }}</td>
-                <td>{{ row.rmse }}</td>
-              </tr>
-            </tbody>
-          </table>
+          <el-table
+            v-if="performanceTable.length"
+            :data="performanceTable"
+            stripe
+            style="max-width: 100%; overflow-x: auto; display: block;"
+            :header-cell-style="{background:'#f5f7fa'}"
+          >
+            <el-table-column prop="route" label="航线" min-width="180" />
+            <el-table-column prop="model" label="模型" width="120" />
+            <el-table-column prop="r2" label="R²" width="100" />
+            <el-table-column prop="mape" label="MAPE (%)" width="120" />
+            <el-table-column prop="rmse" label="RMSE" width="120" />
+          </el-table>
+          <div v-else class="empty-wrap">
+            <el-empty description="暂无预测结果" />
+          </div>
         </div>
       </div>
     </div>
@@ -92,121 +102,199 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as echarts from 'echarts'
 
-// 控制参数
 const timeRange = ref('月度')
 const modelType = ref('ARIMA')
 const numFeatures = ref(3)
+const showTrain = ref(true)
 
-// 图表相关
 const chartRef = ref(null)
 let chartInstance = null
 
-// 航线数据
 const cities = ['北京', '上海', '广州', '深圳', '成都', '杭州']
 const selectedFrom = ref('')
 const selectedTo = ref('')
 const routes = ref([])
-
-// 表格数据
 const performanceTable = ref([])
 
-// 添加航线
 function addRoute() {
   if (!selectedFrom.value || !selectedTo.value) return
   if (selectedFrom.value === selectedTo.value) return
   const exists = routes.value.some(r => r.from === selectedFrom.value && r.to === selectedTo.value)
-  if (!exists) {
-    routes.value.push({ from: selectedFrom.value, to: selectedTo.value })
-  }
+  if (!exists) routes.value.push({ from: selectedFrom.value, to: selectedTo.value })
 }
-
-// 删除航线
 function removeRoute(index) {
   routes.value.splice(index, 1)
 }
 
-// 生成模拟预测数据，航线数 = series 数
-function getDefaultForecastData() {
-  const timeLabels = Array.from({ length: numFeatures.value }, (_, i) => {
-    return `${i + 1}${timeRange.value === '年度' ? '年' : timeRange.value === '季度' ? '季度' : '月'}`
-  })
+function getBaseDate() {
+  const d = new Date()
+  d.setDate(1)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+function addMonths(date, months) {
+  const d = new Date(date)
+  d.setMonth(d.getMonth() + months)
+  return d
+}
+function generateDateLabels(trainLen, predictLen, timeRange) {
+  const baseDate = getBaseDate()
+  const totalLen = trainLen + predictLen
+  let labels = []
 
-  const series = routes.value.map((route, idx) => {
-    return {
-      name: `${route.from}→${route.to}`,
-      type: 'line',
-      data: Array.from({ length: numFeatures.value }, () => Math.round(Math.random() * 1000 + 500))
+  for(let i = 0; i < totalLen; i++) {
+    let date
+    if (timeRange === '年度') {
+      date = new Date(baseDate.getFullYear() - totalLen + i + 1, 0, 1)
+      labels.push(`${date.getFullYear()}年`)
+    } else if (timeRange === '季度') {
+      const curYear = baseDate.getFullYear()
+      const curMonth = baseDate.getMonth()
+      const curQuarter = Math.floor(curMonth / 3) + 1
+      const startQuarterNum = (curYear * 4 + curQuarter) - totalLen + i + 1
+      const year = Math.floor(startQuarterNum / 4)
+      let quarter = startQuarterNum % 4
+      if (quarter === 0) {
+        quarter = 4
+      }
+      labels.push(`${year}Q${quarter}`)
+    } else {
+      date = addMonths(baseDate, i - totalLen)
+      labels.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
     }
-  })
-
-  const performance = routes.value.map(route => ({
-    route: `${route.from} → ${route.to}`,
-    model: modelType.value,
-    r2: (Math.random() * 0.3 + 0.7).toFixed(2),
-    mape: (Math.random() * 10 + 5).toFixed(2),
-    rmse: (Math.random() * 50 + 100).toFixed(2)
-  }))
-
-  return { timeLabels, series, performance }
+  }
+  return labels
 }
 
-// 渲染图表：多条线
+function mockApiRequest() {
+  return new Promise(resolve => {
+    setTimeout(() => {
+      const trainLen = 5
+      const predictLen = numFeatures.value
+      const totalLen = trainLen + predictLen
+
+      const allLabels = generateDateLabels(trainLen, predictLen, timeRange.value)
+      // 如果不显示训练数据，则x轴只显示预测段时间标签
+      const labelsToShow = showTrain.value ? allLabels : allLabels.slice(trainLen)
+
+      const series = []
+      const performance = []
+
+      routes.value.forEach(route => {
+        const trainData = Array.from({ length: trainLen }, () => Math.round(Math.random() * 800 + 200))
+        const predictData = Array.from({ length: predictLen }, () => Math.round(Math.random() * 800 + 200))
+
+        if (showTrain.value) {
+          series.push({
+            name: `${route.from}→${route.to}`,
+            type: 'line',
+            smooth: true,
+            data: [...trainData, ...Array(predictLen).fill(null)],
+            lineStyle: { type: 'solid' }
+          })
+          series.push({
+            name: `${route.from}→${route.to}`,
+            type: 'line',
+            smooth: true,
+            data: [...Array(trainLen).fill(null), ...predictData],
+            lineStyle: { type: 'dashed' }
+          })
+        } else {
+          // 不显示训练时只显示预测段实线
+          series.push({
+            name: `${route.from}→${route.to}`,
+            type: 'line',
+            smooth: true,
+            data: predictData,
+            lineStyle: { type: 'solid' }
+          })
+        }
+
+        performance.push({
+          route: `${route.from} → ${route.to}`,
+          model: modelType.value,
+          r2: (Math.random() * 0.3 + 0.7).toFixed(3),
+          mape: (Math.random() * 10 + 5).toFixed(2),
+          rmse: (Math.random() * 50 + 100).toFixed(2)
+        })
+      })
+
+      resolve({
+        timeLabels: labelsToShow,
+        series,
+        performance
+      })
+    }, 800)
+  })
+}
+
 function renderChart(timeLabels = [], seriesData = []) {
   if (!chartRef.value) return
-  if (!chartInstance) {
-    chartInstance = echarts.init(chartRef.value)
+  if (!chartInstance) chartInstance = echarts.init(chartRef.value)
+  chartInstance.clear()
+
+  if (!seriesData.length) {
+    chartInstance.setOption({
+      graphic: [
+        {
+          type: 'text',
+          left: 'center',
+          top: 'center',
+          style: { text: '暂无预测结果', fontSize: 18, fill: '#9aa4ad' }
+        }
+      ]
+    })
+    return
   }
 
-  const options = {
-    title: {
-      text: '预测结果',
-      textStyle: { color: 'black' }
-    },
+  chartInstance.setOption({
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'cross' }
     },
     legend: {
-      data: seriesData.map(s => s.name)
+      type: 'scroll',
+      data: [...new Set(seriesData.map(s => s.name))],
+      bottom: 0
     },
-    toolbox: {
-      show: true,
-      feature: {
-        dataView: { readOnly: false },
-        magicType: { type: ['line', 'bar', 'stack'] },
-        restore: {},
-        saveAsImage: {}
-      }
-    },
+    grid: { left: '3%', right: '4%', bottom: '12%', containLabel: true },
     xAxis: {
       type: 'category',
-      data: timeLabels
+      data: timeLabels,
+      axisLabel: { rotate: 0 }
     },
     yAxis: { type: 'value' },
     series: seriesData
-  }
-
-  chartInstance.setOption(options)
+  })
 }
 
-// 运行预测（使用模拟数据）
 async function runForecast() {
-  if (routes.value.length === 0) {
+  if (!routes.value.length) {
     alert('请先添加至少一条航线')
     return
   }
-
-  const { timeLabels, series, performance } = getDefaultForecastData()
+  const { timeLabels, series, performance } = await mockApiRequest()
   renderChart(timeLabels, series)
   performanceTable.value = performance
 }
 
-// 初始化空图
+watch(showTrain, async () => {
+  if (!routes.value.length) return
+  const { timeLabels, series, performance } = await mockApiRequest()
+  renderChart(timeLabels, series)
+  performanceTable.value = performance
+})
+
 onMounted(() => {
-  renderChart([], [])
+  renderChart([], [], [])
+  window.addEventListener('resize', () => chartInstance?.resize())
+})
+onBeforeUnmount(() => {
+  chartInstance?.dispose()
+  chartInstance = null
 })
 </script>
 
@@ -218,67 +306,54 @@ onMounted(() => {
 .forecast-content {
   display: flex;
   gap: 2rem;
-  margin-top: 1.5rem;
+  margin-top: 1rem;
 }
+
+/* 控制面板 */
 .control-panel {
-  flex: 0 0 300px;
-  background: white;
+  flex: 0 0 320px;
+  background: #ffffff;
   border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+  padding: 1rem 1.25rem;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
-.result-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-}
-.chart-area {
-  height: 400px;
-  background: #f8f9fa;
-  border-radius: 8px;
-}
-.stat-card {
-  background: white;
-  border-radius: 8px;
-  padding: 1.5rem;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-.stat-card h3 {
+
+.panel-title {
   margin-top: 0;
-  color: #7f8c8d;
+  margin-bottom: 0.6rem;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #2c3e50;
 }
+
+/* form */
 .form-group {
-  margin-bottom: 1.2rem;
+  margin-bottom: 1rem;
 }
-label {
+.form-group label {
   display: block;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
   color: #34495e;
+  font-weight: 600;
 }
-select, input {
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #ddd;
-  border-radius: 4px;
+
+/* 按钮行 */
+.button-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 4%;
+  margin-top: 0.6rem;
 }
 .run-btn {
-  width: 100%;
-  padding: 0.75rem;
-  background: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 1rem;
-  transition: background 0.3s;
-  margin-top: 0.5rem;
+  width: 48%;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
 }
-.run-btn:hover {
-  background: #2980b9;
-}
+
+/* 路由列表 */
 .route-list {
-  margin-top: 1rem;
+  margin-top: 0.8rem;
 }
 .route-list ul {
   list-style: none;
@@ -288,37 +363,66 @@ select, input {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.4rem;
-  background: #f3f4f6;
-  padding: 0.5rem 0.75rem;
-  border-radius: 4px;
+  margin-bottom: 0.45rem;
+  background: #f7f9fb;
+  padding: 0.45rem 0.6rem;
+  border-radius: 6px;
+  font-size: 0.95rem;
 }
-.delete-btn {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 0.25rem 0.6rem;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
+
+/* 结果区 */
+.result-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
 }
-.delete-btn:hover {
-  background: #c0392b;
+.chart-header {
+  padding-bottom: 0.6rem;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  background: #ffffff;
+  border-radius: 8px 8px 0 0;
+  padding-left: 8px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
-.performance-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin-top: 1rem;
+.chart-area {
+  height: 420px;
+  background: #f8f9fa;
+  border-radius: 0 0 8px 8px;
+  padding: 8px;
 }
-.performance-table th,
-.performance-table td {
-  border: 1px solid #ddd;
-  padding: 0.75rem;
-  text-align: center;
+
+/* 表格卡片 */
+.stat-card {
+  background: #ffffff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  max-width: 100%;
+  overflow-x: auto;
 }
-.performance-table th {
-  background: #f0f2f5;
-  color: #2c3e50;
-  font-weight: 600;
+.stat-card h3 {
+  margin: 0 0 8px 0;
+  color: #7f8c8d;
+  font-size: 1rem;
+}
+
+/* empty */
+.empty-wrap {
+  padding: 24px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+@media (max-width: 900px) {
+  .forecast-content {
+    flex-direction: column;
+  }
+  .control-panel {
+    width: 100%;
+  }
 }
 </style>
