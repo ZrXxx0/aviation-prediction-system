@@ -54,90 +54,98 @@ def get_city_airport(iata_code):
 
 """下面是看板部分所需的函数"""
 # 获取航线分布数据
-@api_view(["GET"])
+@api_view(['GET'])
 def route_distribution_view(request):
     """
-    航线分布：
-    - year_month: YYYY-MM 必填
-    - start_city: 起始城市名（可空）
-    - end_city:   到达城市名（可空）
-    返回：城市对的总航班量 + 城市对下各机场对明细
+    获取航线分布数据（支持起始城市与到达城市可选过滤）
+    - year_month: 必填，YYYY-MM
+    - city: 必填，起始城市（"全国"表示不限制起始城市）
+    - to_city: 必填，到达城市（"全国"表示不限制到达城市）
+    
+    逻辑说明：
+    1. 如果city和to_city都是"全国"：查询全国前100航线
+    2. 如果city不是"全国"，to_city是"全国"：查询以city为起点的前100航线
+    3. 如果city是"全国"，to_city不是"全国"：查询目的城市是to_city的前100航线
+    4. 如果city和to_city都不是"全国"：查询两个城市之间的航线
     """
     year_month = request.GET.get("year_month")
-    start_city = request.GET.get("start_city") or ""
-    end_city   = request.GET.get("end_city") or ""
-    print(f"🔍 params: year_month={year_month}, start_city={start_city}, end_city={end_city}")
+    origin_city = request.GET.get("city")      # 起始城市
+    dest_city = request.GET.get("to_city")     # 到达城市
 
-    # 校验年月
-    if not year_month or "-" not in year_month:
+    print(f"🔍 接收到参数 year_month={year_month}, city={origin_city}, to_city={dest_city}")
+
+    # 参数验证
+    if not year_month or '-' not in year_month:
         return Response({"error": "year_month 格式应为 YYYY-MM，如 2024-06"}, status=400)
+    
+    if not origin_city or not dest_city:
+        return Response({"error": "city 和 to_city 参数都是必填的"}, status=400)
+
     try:
-        y, m = year_month.split("-")
-        year, month = int(y), int(m)
+        year_str, month_str = year_month.split("-")
+        year = int(year_str); month = int(month_str)
         if not (1 <= month <= 12):
             return Response({"error": "月份必须在1-12之间"}, status=400)
     except ValueError:
         return Response({"error": "year_month 格式应为 YYYY-MM，如 2024-06"}, status=400)
 
-    # 统一构建过滤条件
+    # ---- 组装过滤条件 ----
     filters = {"year": year, "month": month, "Route_Total_Flights__gt": 0}
-    if start_city:
-        origin_codes = get_codes_by_city(start_city)
+
+    # 处理起始城市过滤
+    if origin_city != "全国":
+        origin_codes = get_codes_by_city(origin_city)
         if not origin_codes:
-            return Response({"error": f"找不到起始城市 {start_city} 的三字码"}, status=404)
+            return Response({"error": f"找不到起始城市 {origin_city} 的三字码"}, status=404)
         filters["origin_code__in"] = origin_codes
 
-    if end_city:
-        dest_codes = get_codes_by_city(end_city)
+    # 处理到达城市过滤
+    if dest_city != "全国":
+        dest_codes = get_codes_by_city(dest_city)
         if not dest_codes:
-            return Response({"error": f"找不到到达城市 {end_city} 的三字码"}, status=404)
+            return Response({"error": f"找不到到达城市 {dest_city} 的三字码"}, status=404)
         filters["destination_code__in"] = dest_codes
 
-    print(f"🔎 查询条件: {filters}")
+    print(f"🔎 最终查询条件: {filters}")
 
-    # 仅取必要字段
-    rows = list(
+    # 仅取必要字段，减少内存
+    route_rows = list(
         RouteMonthlyStat.objects
         .filter(**filters)
         .values("origin_code", "destination_code", "Route_Total_Flights")
     )
-    print(f"📦 取到有效航线条数: {len(rows)}")
-    if not rows:
+    print(f"📦 取到有效航线条数: {len(route_rows)}")
+    if not route_rows:
         return Response([])
 
-    # 批量拉取机场信息，避免 N+1
-    codes = {r["origin_code"] for r in rows} | {r["destination_code"] for r in rows}
+    # 批量拿机场信息（避免 N+1）
+    codes = {r["origin_code"] for r in route_rows} | {r["destination_code"] for r in route_rows}
     info_map = {}
     if codes:
         for a in AirportInfo.objects.filter(code__in=codes):
-            info_map[a.code] = {
-                "code": a.code,
-                "city": a.city,
-                "province": a.province,
-                "airport": a.airport,
-            }
+            info_map[a.code] = {"code": a.code, "city": a.city, "province": a.province, "airport": a.airport}
 
-    # 聚合：城市对总量 + 机场对明细
+    # 聚合：城市对总航班量 & 机场对明细
     city_pair_total = defaultdict(int)
     city_pair_detail = defaultdict(list)
 
-    for r in rows:
+    for r in route_rows:
         o = info_map.get(r["origin_code"], {"code": r["origin_code"], "city": None, "province": None, "airport": None})
         d = info_map.get(r["destination_code"], {"code": r["destination_code"], "city": None, "province": None, "airport": None})
         flights = r["Route_Total_Flights"] or 0
         if flights <= 0:
             continue
 
-        key = (o["city"], d["city"])  # 以城市对为 key
+        key = (o["city"], d["city"])
         city_pair_total[key] += flights
         city_pair_detail[key].append({
-            "from_airport": o["airport"],  # 机场名
+            "from_airport": o["airport"],
             "to_airport": d["airport"],
-            "flights": flights,
+            "flights": flights
         })
 
-    # 构建结果：按总航班量倒序，取前100
-    top_pairs = sorted(city_pair_total.items(), key=lambda x: x[1], reverse=True)[:100]
+    # 构建结果：按总航班量倒序取前100
+    sorted_pairs = sorted(city_pair_total.items(), key=lambda x: x[1], reverse=True)[:100]
     result = [
         {
             "from": fc,
@@ -145,7 +153,7 @@ def route_distribution_view(request):
             "flights": total,
             "detail": sorted(city_pair_detail[(fc, tc)], key=lambda x: x["flights"], reverse=True)
         }
-        for (fc, tc), total in top_pairs
+        for (fc, tc), total in sorted_pairs
     ]
 
     print(f"✅ 返回航线数据: {len(result)} 条")
@@ -153,6 +161,7 @@ def route_distribution_view(request):
 
 # 获取统计卡片数据
 # 若是全国，将所有城市聚合
+@api_view(["GET"])
 def statistics_summary_view(request):
     year_month = request.GET.get("year_month")
     start_city = request.GET.get("start_city")

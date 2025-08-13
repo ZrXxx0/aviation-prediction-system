@@ -30,6 +30,7 @@ const API_ENDPOINTS = {
   // 数据展示相关API
   SHOW: {
     ROUTES: '/show/routes/',
+    ROUTE_DISTRIBUTION: '/show/routes/',
     STATISTICS_SUMMARY: '/show/statistics/summary/',
     STATISTICS_TREND: '/show/statistics/trend/',
   },
