@@ -13,6 +13,9 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ObjectDoesNotExist
 
+import warnings
+warnings.filterwarnings("ignore")
+
 # 添加正确的导入路径，解决pickle加载时的模块依赖问题
 import sys
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -281,10 +284,14 @@ def forecast_route_view(request):
                 results.append(result)
             except Exception as e:
                 # 如果单个预测失败，记录错误但继续处理其他预测
-                results.append({
-                    'error': str(e),
+                import traceback
+                error_details = {
+                    'error_message': str(e),
+                    'error_type': type(e).__name__,
+                    'traceback': traceback.format_exc(),
                     'request': pred
-                })
+                }
+                results.append(error_details)
         
         return JsonResponse({
             'success': True,
@@ -297,9 +304,12 @@ def forecast_route_view(request):
             'message': '请求体必须是有效的JSON格式'
         }, status=400)
     except Exception as e:
+        import traceback
         return JsonResponse({
             'error': '服务器内部错误',
-            'message': str(e)
+            'message': str(e),
+            'error_type': type(e).__name__,
+            'traceback': traceback.format_exc()
         }, status=500)
 
 def _execute_single_prediction(prediction_request):
@@ -369,7 +379,9 @@ def _execute_single_prediction(prediction_request):
         latest_data[date_col] = pd.to_datetime(latest_data[date_col])
         
     except Exception as e:
-        raise Exception(f"加载模型文件失败: {str(e)}")
+        import traceback
+        error_msg = f"加载模型文件失败: {str(e)}\n详细错误信息:\n{traceback.format_exc()}"
+        raise Exception(error_msg)
     
     # 获取预测所需的信息
     feature_cols = metadata.get('feature_columns', [])
