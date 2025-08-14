@@ -19,5 +19,5 @@ from django.urls import path, include
 from . import views
 
 urlpatterns = [
-
+    path('/forecast/run/', views.forecast_route_view, name='forecast_route_view'),
 ]
