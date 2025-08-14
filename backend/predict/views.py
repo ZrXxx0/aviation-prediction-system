@@ -1,19 +1,29 @@
+import os
+import pickle
+import json
+import pandas as pd
+import numpy as np
+from datetime import datetime
 from django.shortcuts import render
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-import json
-import pandas as pd
 from django.http import JsonResponse
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ObjectDoesNotExist
-from .models import MacroEconomicIndicator, FlightStatRecord, PredictionRecord
-from show.models import RouteMonthlyStat
-from .serializers import MacroEconomicIndicatorSerializer, PredictionRecordSerializer, RouteMonthlyStatSerializer
-from django.db.models import Sum
+
+# 添加正确的导入路径，解决pickle加载时的模块依赖问题
+import sys
+current_dir = os.path.dirname(os.path.abspath(__file__))
+predictive_algorithm_dir = os.path.join(current_dir, 'predictive_algorithm')
+if predictive_algorithm_dir not in sys.path:
+    sys.path.insert(0, predictive_algorithm_dir)
+
 from .predictive_algorithm.predict import forecast_from_files
 from .models import RouteModelInfo
 from show.models import AirportInfo
+
 
 
 def _to_bool(s: str, default=True):
@@ -47,396 +57,427 @@ def _fmt_label(dt_like, granularity: str) -> str:
         return f"{d.year}-Q{q}"
     return d.strftime("%Y-%m")
 
-# 预测函数
+# 获取预测模型函数
 @require_GET
-def forecast_batch_chart_view(request):
+def get_forecast_models(request):
     """
-    批量预测（多航线、多套参数），按 timeLabels/series/performance 返回：
-    GET /api/forecast-chart?jobs=[{...},{...}]
-    jobs 例子：
-    [
-      {"timeRange":"monthly","numFeatures":12,"modelType":"lgb","fromCity":"北京","toCity":"上海","showTrain":true},
-      {"timeRange":"quarterly","numFeatures":6,"modelType":"lgb","fromCity":"广州","toCity":"北京","showTrain":false}
-    ]
-
-    若无 jobs，则兼容单套参数：
-    /api/forecast-chart?timeRange=monthly&numFeatures=12&modelType=lgb&fromCity=北京&toCity=上海&showTrain=true
+    获取可用于预测的模型列表
+    
+    参数：
+    - origin_airport: 起点机场三字码
+    - destination_airport: 终点机场三字码  
+    - time_granularity: 时间粒度 (yearly/quarterly/monthly)
+    
+    返回：
+    - 按模型质量排序的模型列表，每个模型包含：
+      - model_id: 模型ID
+      - 8个评估指标 (train_mae, train_rmse, train_mape, train_r2, test_mae, test_rmse, test_mape, test_r2)
+      - train_start_time: 训练开始时间
+      - train_end_time: 训练结束时间
     """
     try:
-        # 1) 解析 jobs（批量优先；否则单条兜底）
-        jobs_param = request.GET.get("jobs")
-        if jobs_param:
-            try:
-                jobs = json.loads(jobs_param)
-                if not isinstance(jobs, list):
-                    return JsonResponse({"error": "jobs 必须是 JSON 数组"}, status=400)
-            except Exception:
-                return JsonResponse({"error": "jobs 需为合法 JSON 数组"}, status=400)
-        else:
-            jobs = [{
-                "timeRange": request.GET.get("timeRange", "monthly"),
-                "numFeatures": request.GET.get("numFeatures", 12),
-                "modelType": request.GET.get("modelType", "lgb"),
-                "fromCity": request.GET.get("fromCity"),
-                "toCity": request.GET.get("toCity"),
-                "showTrain": _to_bool(request.GET.get("showTrain"), True),
-            }]
-
-        payloads, errors = [], []
-
-        # 2) 逐 job 处理
-        for idx, job in enumerate(jobs, start=1):
-            # ---- 参数读取 & 校验 ----
-            time_range = (job.get("timeRange") or "monthly").lower()
-            model_type = job.get("modelType", "lgb")  # 目前不参与筛选，仅占位
-            try:
-                num_features = int(job.get("numFeatures", 12))
-            except Exception:
-                errors.append({"index": idx, "error": "numFeatures 必须为整数"})
-                continue
-            from_city = job.get("fromCity")
-            to_city   = job.get("toCity")
-            show_train = _to_bool(job.get("showTrain"), True)
-
-            if not from_city or not to_city:
-                errors.append({"index": idx, "error": "fromCity / toCity 不能为空"})
-                continue
-            if time_range not in ("monthly", "quarterly", "yearly"):
-                errors.append({"index": idx, "error": "timeRange 仅支持 monthly/quarterly/yearly"})
-                continue
-            if num_features <= 0:
-                errors.append({"index": idx, "error": "numFeatures 必须为正整数"})
-                continue
-
-            # ---- 城市 -> 三字码 ----
-            origin_codes = get_codes_by_city(from_city)
-            dest_codes   = get_codes_by_city(to_city)
-            if not origin_codes:
-                errors.append({"index": idx, "route": f"{from_city}->{to_city}", "error": f"未找到起点城市 {from_city} 的机场三字码"})
-                continue
-            if not dest_codes:
-                errors.append({"index": idx, "route": f"{from_city}->{to_city}", "error": f"未找到终点城市 {to_city} 的机场三字码"})
-                continue
-
-            # ---- 模型：粒度 + 码集合，取最新 ----
-            qs = (
-                RouteModelInfo.objects
-                .filter(
-                    time_granularity=time_range,
-                    origin_airport__in=origin_codes,
-                    destination_airport__in=dest_codes,
-                )
-                .order_by("-train_datetime")
-            )
-            if not qs.exists():
-                errors.append({"index": idx, "route": f"{from_city}->{to_city}", "error": f"未找到该航线（粒度 {time_range}）的已训练模型"})
-                continue
-
-            m = qs.first()
-
-            # ---- 调用你的预测函数（会保存 prediction_results_{numFeatures}.csv）----
-            df = forecast_from_files(
-                meta_file_path=m.meta_file_path,
-                model_file_path=m.model_file_path,
-                raw_data_file_path=m.raw_data_file_path,
-                preprocessor_file_path=m.preprocessor_file_path,
-                feature_builder_file_path=m.feature_builder_file_path,
-                showTrain=show_train,
-                numFeatures=num_features,
-                save_data=True,
-            )
-
-            # ---- 统一处理 forecast_from_files 的返回 ----
-            df = df.copy()
-            # 1) 确保时间类型并排序
-            df["YearMonth"] = pd.to_datetime(df["YearMonth"], errors="coerce")
-            df = df.dropna(subset=["YearMonth"]).sort_values("YearMonth").reset_index(drop=True)
-
-            # 2) 生成 timeLabels
-            if show_train:
-                # 全段（Train+Test+Future）
-                labels = [_fmt_label(x, time_range) for x in df["YearMonth"]]
-            else:
-                # 只未来
-                fpart = df[df["Set"] == "Future"]
-                labels = [_fmt_label(x, time_range) for x in fpart["YearMonth"]]
-
-            # 3) 组装 series（历史为实线，未来为虚线；或仅未来）
-            o_info = build_info(m.origin_airport)
-            d_info = build_info(m.destination_airport)
-            line_name = f"{o_info.get('city') or m.origin_airport} → {d_info.get('city') or m.destination_airport}"
-
-            if show_train:
-                hist_mask = df["Set"].isin(["Train", "Test"])
-                fut_mask  = df["Set"].eq("Future")
-                series = [
-                    {
-                        "name": line_name,
-                        "type": "line",
-                        "smooth": True,
-                        "data": [None if pd.isna(v) else float(v) for v in df["Predicted"].where(hist_mask)],
-                        "lineStyle": {"type": "solid"},
-                    },
-                    {
-                        "name": line_name,
-                        "type": "line",
-                        "smooth": True,
-                        "data": [None if pd.isna(v) else float(v) for v in df["Predicted"].where(fut_mask)],
-                        "lineStyle": {"type": "dashed"},
-                    },
-                ]
-            else:
-                fpart = df[df["Set"] == "Future"]
-                series = [{
-                    "name": line_name,
-                    "type": "line",
-                    "smooth": True,
-                    "data": [None if pd.isna(v) else float(v) for v in fpart["Predicted"]],
-                    "lineStyle": {"type": "solid"},
-                }]
-
-            # 4) performance：优先用测试集指标，缺失则降级训练集
-            def _fmt(v, nd=2):
-                if v is None:
-                    return None
-                try:
-                    return f"{float(v):.{nd}f}"
-                except Exception:
-                    return None
-
-            r2   = m.test_r2  if m.test_r2  is not None else m.train_r2
-            mape = m.test_mape if m.test_mape is not None else m.train_mape
-            rmse = m.test_rmse if m.test_rmse is not None else m.train_rmse
-
-            performance = [{
-                "route": line_name,
-                "model": model_type,
-                "r2":   _fmt(r2, 3),
-                "mape": _fmt(mape, 2),
-                "rmse": _fmt(rmse, 2),
-            }]
-
-            # 5) 单 job 的 payload
-            payloads.append({
-                "timeLabels": labels,
-                "series": series,
-                "performance": performance,
-                "meta": {  # 方便前端展示或排查
-                    "timeRange": time_range,
-                    "numFeatures": num_features,
-                    "model_id": m.model_id,
-                    "trained_at": m.train_datetime,
-                    "origin": o_info,
-                    "destination": d_info,
-                }
-            })
-
-        # 3) 返回：若只有1套且无错误 -> 直接返回 payload；否则返回 {payloads, errors}
-        if len(payloads) == 1 and not errors:
-            return JsonResponse(payloads[0], json_dumps_params={"ensure_ascii": False})
-        return JsonResponse({"payloads": payloads, "errors": errors}, json_dumps_params={"ensure_ascii": False})
-
-    except Exception as e:
-        return JsonResponse({"status": "error", "message": str(e)}, status=500)
-
-# 获取特定年份、城市经济数据
-@api_view(['GET'])
-def macro_indicator_view(request):
-    city = request.GET.get('city')
-    province = request.GET.get('province')
-    year = request.GET.get('year')
-
-    qs = MacroEconomicIndicator.objects.all()
-    if city:
-        qs = qs.filter(city=city)
-    if province:
-        qs = qs.filter(province=province)
-    if year:
-        qs = qs.filter(year=year)
-    else:
-        qs = qs.order_by('-year')[:1]  # 默认查最近一条
-
-    if not qs.exists():
-        return Response({"message": "无匹配数据"}, status=status.HTTP_404_NOT_FOUND)
-
-    serializer = MacroEconomicIndicatorSerializer(qs, many=True)
-    return Response(serializer.data)
-
-# 获取最近五年城市的经济数据
-@api_view(['GET'])
-def macro_indicator_trend_view(request):
-    city = request.GET.get('city')
-    if not city:
-        return Response({"error": "必须传入城市名 city"}, status=status.HTTP_400_BAD_REQUEST)
-
-    # 查询该城市最近 5 年的数据
-    qs = MacroEconomicIndicator.objects.filter(city=city).order_by("-year")[:5]
-    qs = qs.order_by("year")  # 按时间升序排列
-
-    if not qs.exists():
-        return Response({"message": "未找到该城市的宏观经济数据"}, status=status.HTTP_404_NOT_FOUND)
-
-    serializer = MacroEconomicIndicatorSerializer(qs, many=True)
-    return Response({
-        "city": city,
-        "count": qs.count(),
-        "data": serializer.data
-    })
-
-
-# 获取机型分布信息和 TOP10 城市运量
-@api_view(["GET"])
-def flight_statistics_view(request):
-    origin = request.GET.get("origin")
-    period = request.GET.get("period")  # 例如 "2024-07"
-    period_type = request.GET.get("period_type", "monthly")  # 默认月度
-
-    if not origin or not period:
-        return Response({"error": "必须提供 origin 和 period"}, status=400)
-
-    # 查询数据
-    qs = FlightStatRecord.objects.filter(
-        origin=origin,
-        period__startswith=period,
-        period_type=period_type
-    )
-
-    if not qs.exists():
-        return Response({"message": "无匹配数据"}, status=404)
-
-    # 1. 机型分布
-    aircraft_distribution = qs.values("aircraft_type").annotate(
-        total_capacity=Sum("available_capacity"),
-        total_volume=Sum("actual_volume")
-    )
-
-    # 2. TOP10 城市运量
-    top10_cities = (
-        qs.values("destination")
-        .annotate(total_volume=Sum("actual_volume"))
-        .order_by("-total_volume")[:10]
-    )
-
-    return Response({
-        "origin": origin,
-        "period": period,
-        "aircraft_distribution": list(aircraft_distribution),
-        "top10_destinations": list(top10_cities),
-    })
-
-@api_view(['GET'])
-def prediction_record_list(request):
-    """
-    查询预测历史记录（支持根据 origin、destination、时间筛选）
-    """
-    origin = request.GET.get("origin")
-    destination = request.GET.get("destination")
-    start = request.GET.get("start_date")
-    end = request.GET.get("end_date")
-
-    qs = PredictionRecord.objects.all()
-    if origin:
-        qs = qs.filter(origin__icontains=origin)
-    if destination:
-        qs = qs.filter(destination__icontains=destination)
-    if start and end:
-        qs = qs.filter(prediction_date__range=[start, end])
-
-    qs = qs.order_by("-prediction_date")
-
-    serializer = PredictionRecordSerializer(qs, many=True)
-    return Response(serializer.data)
-
-
-@api_view(['GET'])
-def route_stat_query(request):
-    origin = request.GET.get('origin')
-    destination = request.GET.get('destination')
-    year = request.GET.get('year')
-    month = request.GET.get('month')
-
-    if not (origin and destination and year and month):
-        return Response({"error": "请提供 origin、destination、year、month"}, status=status.HTTP_400_BAD_REQUEST)
-
-    qs = RouteMonthlyStat.objects.filter(
-        origin_city=origin,
-        destination_city=destination,
-        year=int(year),
-        month=int(month)
-    )
-
-    if not qs.exists():
-        return Response({"message": "无数据"}, status=404)
-
-    serializer = RouteMonthlyStatSerializer(qs, many=True)
-    return Response(serializer.data)
-
-"""下面是看板部分所需的函数"""
-# 获取过去10年数据
-@api_view(['GET'])
-def route_stat_yearly_total(request):
-    origin = request.GET.get('origin')
-    destination = request.GET.get('destination')
-
-    if not (origin and destination):
-        return Response({"error": "请提供 origin 和 destination"}, status=400)
-
-    qs = RouteMonthlyStat.objects.filter(
-        origin_city=origin,
-        destination_city=destination
-    )
-
-    # 获取过去10年（如果数据很多就限制近10年）
-    years = sorted(set(qs.values_list("year", flat=True)))
-    if len(years) > 10:
-        years = years[-10:]
-        qs = qs.filter(year__in=years)
-
-    result = (
-        qs.values("year")
-        .annotate(
-            total_passenger_volume=Sum("passenger_volume"),
-            total_seat_capacity=Sum("seat_capacity"),
-            total_flight_count=Sum("flight_count"),
+        # 获取查询参数
+        origin_airport = request.GET.get('origin_airport', '').upper()
+        destination_airport = request.GET.get('destination_airport', '').upper()
+        time_granularity = request.GET.get('time_granularity', '')
+        
+        # 参数验证
+        if not origin_airport or not destination_airport or not time_granularity:
+            return JsonResponse({
+                'error': '缺少必要参数',
+                'message': '请提供 origin_airport, destination_airport 和 time_granularity 参数'
+            }, status=400)
+        
+        if time_granularity not in ['yearly', 'quarterly', 'monthly']:
+            return JsonResponse({
+                'error': '无效的时间粒度',
+                'message': 'time_granularity 必须是 yearly, quarterly 或 monthly 之一'
+            }, status=400)
+        
+        # 查询匹配的模型
+        models = RouteModelInfo.objects.filter(
+            origin_airport=origin_airport,
+            destination_airport=destination_airport,
+            time_granularity=time_granularity
         )
-        .order_by("year")
-    )
+        
+        if not models.exists():
+            return JsonResponse({
+                'error': '未找到匹配的模型',
+                'message': f'未找到从 {origin_airport} 到 {destination_airport} 的 {time_granularity} 粒度预测模型'
+            }, status=404)
+        
+        # 计算每个模型的综合评分（用于排序）
+        model_list = []
+        for model in models:
+            # 使用测试集指标作为主要评估标准，训练集指标作为辅助
+            # 综合评分 = (1 - test_mape) * 0.4 + test_r2 * 0.3 + (1 - test_mae/1000) * 0.2 + (1 - test_rmse/1000) * 0.1
+            # 这里假设MAE和RMSE的合理范围在1000以内，实际使用时可能需要根据数据特点调整
+            
+            test_mae_score = 0 if model.test_mae is None else max(0, 1 - model.test_mae / 1000)
+            test_rmse_score = 0 if model.test_rmse is None else max(0, 1 - model.test_rmse / 1000)
+            test_mape_score = 0 if model.test_mape is None else max(0, 1 - model.test_mape / 100)
+            test_r2_score = 0 if model.test_r2 is None else max(0, model.test_r2)
+            
+            # 如果测试集指标缺失，使用训练集指标
+            if model.test_mae is None and model.train_mae is not None:
+                test_mae_score = max(0, 1 - model.train_mae / 1000)
+            if model.test_rmse is None and model.train_rmse is not None:
+                test_rmse_score = max(0, 1 - model.train_rmse / 1000)
+            if model.test_mape is None and model.train_mape is not None:
+                test_mape_score = max(0, 1 - model.train_mape / 100)
+            if model.test_r2 is None and model.train_r2 is not None:
+                test_r2_score = max(0, model.train_r2)
+            
+            # 计算综合评分
+            composite_score = (
+                test_mape_score * 0.4 + 
+                test_r2_score * 0.3 + 
+                test_mae_score * 0.2 + 
+                test_rmse_score * 0.1
+            )
+            
+            model_info = {
+                'model_id': model.model_id,
+                'train_mae': model.train_mae,
+                'train_rmse': model.train_rmse,
+                'train_mape': model.train_mape,
+                'train_r2': model.train_r2,
+                'test_mae': model.test_mae,
+                'test_rmse': model.test_rmse,
+                'test_mape': model.test_mape,
+                'test_r2': model.test_r2,
+                'train_start_time': model.train_start_time.strftime('%Y-%m-%d') if model.train_start_time else None,
+                'train_end_time': model.train_end_time.strftime('%Y-%m-%d') if model.train_end_time else None,
+                'composite_score': round(composite_score, 4)  # 添加综合评分用于调试
+            }
+            
+            model_list.append((model_info, composite_score))
+        
+        # 按综合评分降序排序（最好的模型在前）
+        model_list.sort(key=lambda x: x[1], reverse=True)
+        
+        # 提取排序后的模型信息（去掉评分）
+        sorted_models = [model_info for model_info, _ in model_list]
+        
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'origin_airport': origin_airport,
+                'destination_airport': destination_airport,
+                'time_granularity': time_granularity,
+                'model_count': len(sorted_models),
+                'models': sorted_models
+            }
+        })
+        
+    except Exception as e:
+        return JsonResponse({
+            'error': '服务器内部错误',
+            'message': str(e)
+        }, status=500)
 
-    return Response(list(result))
+# 预测并返回结果函数
+@csrf_exempt  # 仅用于测试，避免403错误
+@require_POST
+def forecast_route_view(request):
+    """
+    批量预测航线座位数
+    
+    请求体格式：
+    {
+        "predictions": [
+            {
+                "origin_airport": "CAN",  # 起始机场三字码
+                "destination_airport": "PEK",  # 终点机场三字码
+                "time_granularity": "monthly",  # 预测时间粒度 (yearly/quarterly/monthly)
+                "prediction_periods": 12,  # 预测时间长度
+                "model_id": "model_id_123"  # 使用的预测模型ID
+            }
+        ]
+    }
+    
+    返回格式：
+    {
+        "success": true,
+        "data": [
+            {
+                "model_info": {
+                    "model_id": "model_id_123",
+                    "origin_airport": "CAN",
+                    "destination_airport": "PEK",
+                    "time_granularity": "monthly",
+                    "model_type": "LightGBM",
+                    "feature_count": 25,
+                    "training_samples": 120,
+                    "test_samples": 30,
+                    "train_mae": 45.2,
+                    "train_rmse": 67.8,
+                    "train_mape": 0.15,
+                    "train_r2": 0.89,
+                    "test_mae": 52.1,
+                    "test_rmse": 71.3,
+                    "test_mape": 0.18,
+                    "test_r2": 0.85,
+                    "train_start_time": "2023-01-01",
+                    "train_end_time": "2023-12-31",
+                    "last_complete_date": "2024-01-31"
+                },
+                "prediction_results": {
+                    "historical_data": [
+                        {"time_point": "2023-01", "value": 1200},
+                        {"time_point": "2023-02", "value": 1350}
+                    ],
+                    "future_predictions": [
+                        {"time_point": "2024-02", "value": 1400},
+                        {"time_point": "2024-03", "value": 1450}
+                    ]
+                }
+            }
+        ]
+    }
+    """
+    try:
+        # 解析请求体
+        data = json.loads(request.body)
+        predictions = data.get('predictions', [])
+        
+        if not predictions:
+            return JsonResponse({
+                'error': '缺少预测请求',
+                'message': '请提供 predictions 数组'
+            }, status=400)
+        
+        # 验证每个预测请求
+        for i, pred in enumerate(predictions):
+            required_fields = ['origin_airport', 'destination_airport', 'time_granularity', 'prediction_periods', 'model_id']
+            missing_fields = [field for field in required_fields if field not in pred]
+            
+            if missing_fields:
+                return JsonResponse({
+                    'error': f'预测请求 {i+1} 缺少必要字段',
+                    'message': f'缺少字段: {", ".join(missing_fields)}'
+                }, status=400)
+            
+            # 验证时间粒度
+            if pred['time_granularity'] not in ['yearly', 'quarterly', 'monthly']:
+                return JsonResponse({
+                    'error': f'预测请求 {i+1} 无效的时间粒度',
+                    'message': 'time_granularity 必须是 yearly, quarterly 或 monthly 之一'
+                }, status=400)
+            
+            # 验证预测期数
+            if not isinstance(pred['prediction_periods'], int) or pred['prediction_periods'] <= 0:
+                return JsonResponse({
+                    'error': f'预测请求 {i+1} 无效的预测期数',
+                    'message': 'prediction_periods 必须是正整数'
+                }, status=400)
+        
+        # 执行预测
+        results = []
+        for pred in predictions:
+            try:
+                result = _execute_single_prediction(pred)
+                results.append(result)
+            except Exception as e:
+                # 如果单个预测失败，记录错误但继续处理其他预测
+                results.append({
+                    'error': str(e),
+                    'request': pred
+                })
+        
+        return JsonResponse({
+            'success': True,
+            'data': results
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'error': '无效的JSON格式',
+            'message': '请求体必须是有效的JSON格式'
+        }, status=400)
+    except Exception as e:
+        return JsonResponse({
+            'error': '服务器内部错误',
+            'message': str(e)
+        }, status=500)
 
-
-# 获取最近的12个月的数据
-@api_view(['GET'])
-def route_stat_recent_12_months(request):
-    origin = request.GET.get('origin')
-    destination = request.GET.get('destination')
-
-    if not (origin and destination):
-        return Response({"error": "请提供 origin 和 destination"}, status=400)
-
-    # 查询该航线的所有记录，按年+月倒序排列
-    qs = RouteMonthlyStat.objects.filter(
-        origin_city=origin,
-        destination_city=destination
-    ).order_by("-year", "-month")[:12]
-
-    # 重新按升序排列以便图表展示（从最早到最近）
-    qs = sorted(qs, key=lambda x: (x.year, x.month))
-
-    # 返回最近十二个月的数据
-    data = [
-        {
-            "year": q.year,
-            "month": q.month,
-            "label": f"{q.year}-{q.month:02d}",
-            "passenger_volume": q.passenger_volume,   #
-            "Route_Total_Seats": q.Route_Total_Seats,
-            "Route_Total_Flights": q.Route_Total_Flights
-        } for q in qs
-    ]
-
-    return Response({
-        "origin": origin,
-        "destination": destination,
-        "data": data
-    })
+def _execute_single_prediction(prediction_request):
+    """
+    执行单个预测请求
+    
+    Args:
+        prediction_request: 包含预测参数的字典
+        
+    Returns:
+        包含模型信息和预测结果的字典
+    """
+    
+    origin_airport = prediction_request['origin_airport'].upper()
+    destination_airport = prediction_request['destination_airport'].upper()
+    time_granularity = prediction_request['time_granularity']
+    prediction_periods = prediction_request['prediction_periods']
+    model_id = prediction_request['model_id']
+    
+    # 从数据库获取模型信息
+    try:
+        model_info = RouteModelInfo.objects.get(model_id=model_id)
+    except RouteModelInfo.DoesNotExist:
+        raise Exception(f"未找到模型ID: {model_id}")
+    
+    # 验证模型是否匹配请求的航线和时间粒度
+    if (model_info.origin_airport != origin_airport or 
+        model_info.destination_airport != destination_airport or
+        model_info.time_granularity != time_granularity):
+        raise Exception(f"模型 {model_id} 与请求的航线或时间粒度不匹配")
+    
+    # 构建根目录路径 - 使用更可靠的路径构建方法
+    current_dir = os.path.dirname(os.path.abspath(__file__))  # 当前文件所在目录
+    base_dir = os.path.join(os.path.dirname(current_dir), 'AirlineModels')  # 上级目录下的AirlineModels
+    
+    # 加载模型文件
+    model_file_path = os.path.join(base_dir, model_info.model_file_path)
+    preprocessor_file_path = os.path.join(base_dir, model_info.preprocessor_file_path)
+    feature_builder_file_path = os.path.join(base_dir, model_info.feature_builder_file_path)
+    meta_file_path = os.path.join(base_dir, model_info.meta_file_path)
+    raw_data_file_path = os.path.join(base_dir, model_info.raw_data_file_path)
+    
+    # 检查文件是否存在
+    required_files = [model_file_path, preprocessor_file_path, feature_builder_file_path, 
+                     meta_file_path, raw_data_file_path]
+    for file_path in required_files:
+        if not os.path.exists(file_path):
+            raise Exception(f"文件不存在: {file_path}")
+    
+    try:
+        # 加载模型组件
+        with open(model_file_path, "rb") as f:
+            model = pickle.load(f)
+        
+        with open(preprocessor_file_path, "rb") as f:
+            preprocessor = pickle.load(f)
+        
+        with open(feature_builder_file_path, "rb") as f:
+            feature_builder = pickle.load(f)
+        
+        with open(meta_file_path, "r", encoding='utf-8') as f:
+            metadata = json.load(f)
+        
+        # 加载原始数据
+        latest_data = pd.read_csv(raw_data_file_path)
+        date_col = metadata.get('date_column', 'YearMonth')
+        latest_data[date_col] = pd.to_datetime(latest_data[date_col])
+        
+    except Exception as e:
+        raise Exception(f"加载模型文件失败: {str(e)}")
+    
+    # 获取预测所需的信息
+    feature_cols = metadata.get('feature_columns', [])
+    target_col = metadata.get('target_column', 'Seats')
+    last_complete_date = pd.to_datetime(metadata.get('last_complete_date', latest_data[date_col].max()))
+    
+    # 根据时间粒度调整预测期数
+    if time_granularity == 'quarterly':
+        adjusted_periods = prediction_periods
+    elif time_granularity == 'yearly':
+        adjusted_periods = prediction_periods
+    else:
+        adjusted_periods = prediction_periods
+    
+    # 调整最后完整日期到对应的时间粒度
+    if time_granularity == 'quarterly':
+        while last_complete_date.month not in [3, 6, 9, 12]:
+            last_complete_date -= pd.DateOffset(months=1)
+    elif time_granularity == 'yearly':
+        while last_complete_date.month != 12:
+            last_complete_date -= pd.DateOffset(months=1)
+    
+    # 执行预测
+    future_preds = []
+    current_data = latest_data.copy()
+    
+    for i in range(adjusted_periods):
+        # 计算下一个时间点
+        if time_granularity == 'monthly':
+            offset = pd.DateOffset(months=1)
+        elif time_granularity == 'quarterly':
+            offset = pd.DateOffset(months=3)
+        else:  # yearly
+            offset = pd.DateOffset(years=1)
+        
+        next_date = last_complete_date + offset
+        
+        # 创建新的数据行
+        next_row = {date_col: next_date}
+        for col in current_data.columns:
+            if col != date_col:
+                next_row[col] = np.nan
+        
+        # 添加新行并处理
+        current_data = pd.concat([current_data, pd.DataFrame([next_row])], ignore_index=True)
+        current_data = preprocessor.fit_transform(current_data)
+        current_data = feature_builder.fit_transform(current_data)
+        
+        # 预测
+        latest_input = current_data.iloc[[-1]][feature_cols]
+        next_pred = model.predict(latest_input)[0]
+        
+        # 更新数据
+        current_data.loc[current_data.index[-1], target_col] = next_pred
+        
+        future_preds.append({
+            'YearMonth': next_date,
+            'Predicted': next_pred
+        })
+        
+        last_complete_date = next_date
+    
+    future_df = pd.DataFrame(future_preds)
+    
+    # 构建模型信息返回
+    model_info_response = {
+        'model_id': model_info.model_id,
+        'origin_airport': model_info.origin_airport,
+        'destination_airport': model_info.destination_airport,
+        'time_granularity': model_info.time_granularity,
+        'model_type': metadata.get('model_type', 'LightGBM'),
+        'feature_count': len(feature_cols),
+        'training_samples': metadata.get('training_samples', len(latest_data)),
+        'test_samples': metadata.get('test_samples', 0),
+        'train_mae': model_info.train_mae,
+        'train_rmse': model_info.train_rmse,
+        'train_mape': model_info.train_mape,
+        'train_r2': model_info.train_r2,
+        'test_mae': model_info.test_mae,
+        'test_rmse': model_info.test_rmse,
+        'test_mape': model_info.test_mape,
+        'test_r2': model_info.test_r2,
+        'train_start_time': model_info.train_start_time.strftime('%Y-%m-%d') if model_info.train_start_time else None,
+        'train_end_time': model_info.train_end_time.strftime('%Y-%m-%d') if model_info.train_end_time else None,
+        'last_complete_date': metadata.get('last_complete_date')
+    }
+    
+    # 构建历史数据
+    historical_data = []
+    for _, row in latest_data.iterrows():
+        historical_data.append({
+            'time_point': _fmt_label(row[date_col], time_granularity),
+            'value': int(row[target_col]) if pd.notna(row[target_col]) else None
+        })
+    
+    # 构建未来预测数据
+    future_predictions = []
+    for _, row in future_df.iterrows():
+        future_predictions.append({
+            'time_point': _fmt_label(row['YearMonth'], time_granularity),
+            'value': int(row['Predicted']) if pd.notna(row['Predicted']) else None
+        })
+    
+    # 返回结果
+    return {
+        'model_info': model_info_response,
+        'prediction_results': {
+            'historical_data': historical_data,
+            'future_predictions': future_predictions
+        }
+    }

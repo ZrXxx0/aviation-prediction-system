@@ -267,7 +267,7 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
                 ts.loc[tail_na.index] = predicted
         except Exception as e:
             # 模型失败时使用后备策略
-            warnings.warn(f"TS model failed for {col_name}: {str(e)}. Using fallback method.")
+            warnings.warn(f"TS model failed: {str(e)}. Using fallback method.")
             return self._fallback_tail_fill(ts, fit_data, tail_na)
         
         return ts
@@ -300,7 +300,7 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             ts.loc[tail_na.index] = predicted
         except Exception as e:
             # 回归失败时使用最后一个有效值
-            warnings.warn(f"Regression failed for {col_name}: {str(e)}. Using last valid value.")
+            warnings.warn(f"Regression failed: {str(e)}. Using last valid value.")
             last_value = fit_data.iloc[-1]
             ts.loc[tail_na.index] = last_value
         
@@ -358,7 +358,7 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
                 
         except Exception as e:
             # 模型失败时使用后备策略
-            warnings.warn(f"TS model failed for {col_name}: {str(e)}. Using fallback method.")
+            warnings.warn(f"TS model failed: {str(e)}. Using fallback method.")
             ts = self._fallback_tail_fill(ts, fit_data, tail_na)
         
         return ts
@@ -373,8 +373,8 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             last_values = fit_data.iloc[-n:]
             fill_value = np.average(last_values, weights=weights)
         else:
-            # 无有效数据时使用列统计
-            fill_value = self.column_stats.get(col_name, {}).get('median', 0)
+            # 无有效数据时使用列统计，这里无法获取列名，使用默认值
+            fill_value = 0
         
         ts.loc[tail_na.index] = fill_value
         return ts

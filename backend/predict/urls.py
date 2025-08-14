@@ -19,11 +19,6 @@ from django.urls import path, include
 from . import views
 
 urlpatterns = [
-    path('macro-indicator/', views.macro_indicator_view, name='macro_indicator'),
-    path('macro-indicator-trend/', views.macro_indicator_trend_view, name='macro_indicator_trend'),
-    path('flight-statistics/', views.flight_statistics_view, name='flight_statistics'),
-    path('prediction-records/', views.prediction_record_list, name='prediction_records'),
-    path('route-stat-query/', views.route_stat_query, name='route_stat_query'),
-    path('route-stat-yearly/', views.route_stat_yearly_total, name='route_stat_yearly'),
-    path('route-stat-recent/', views.route_stat_recent_12_months, name='route_stat_recent'),
+    path('forecast/models/', views.get_forecast_models, name='get_forecast_models'),
+    path('forecast/run/', views.forecast_route_view, name='forecast_route_view'),
 ]
