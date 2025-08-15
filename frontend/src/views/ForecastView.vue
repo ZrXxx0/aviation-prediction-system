@@ -17,7 +17,7 @@
 
         <!-- 预测时间长度 -->
         <div class="form-group small-input" :disabled="isConfigured">
-          <label>预测时间长度（预测部分长度）</label>
+          <label>预测时间长度</label>
           <el-input-number v-model="numFeatures" :min="1" :controls="false" class="small-number" :disabled="isConfigured" />
         </div>
 
