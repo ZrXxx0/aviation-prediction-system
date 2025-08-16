@@ -63,10 +63,14 @@ class RouteModelInfo(models.Model):
     remark = models.TextField(null=True, blank=True)   # 备注信息，可以记录模型的训练环境信息等
     created_at = models.DateTimeField(auto_now_add=True)
 
-    # 与预训练表相关联
-    pretrain_key = models.CharField(
-        max_length=64, null=True, blank=True, db_index=True,
-        help_text="来源的预训练键（轻耦合，无外键）"
+    # 外键关联预训练记录
+    pretrain_record = models.ForeignKey(
+        "PretrainRecord",
+        on_delete=models.SET_NULL,  # 删除 PretrainRecord 时设为 NULL
+        null=True,  # 数据库层面允许 NULL
+        blank=True,  # 表单/管理后台允许留空
+        related_name="route_models",
+        help_text="来源的预训练记录"
     )
 
     class Meta:
@@ -164,8 +168,6 @@ class FlightMarketRecord(models.Model):
         return f"{self.year_month} {self.origin}-{self.destination} {self.equipment}"
 
 
-
-
 # 预训练记录表
 class PretrainRecord(models.Model):
     GRANULARITY_CHOICES = [
@@ -173,6 +175,7 @@ class PretrainRecord(models.Model):
         ("quarterly", "季度"),
         ("monthly", "月度"),
     ]
+    id = models.AutoField(primary_key=True, verbose_name="ID")  # 自增主键
     origin = models.CharField(max_length=10, verbose_name="起点")
     destination = models.CharField(max_length=10, verbose_name="终点")
 
@@ -217,38 +220,15 @@ class PretrainRecord(models.Model):
 
     # 审计字段
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
-    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
-
-    # 轻耦合标识：用于跟RouteModelInfo航线预测模型关联
-    pretrain_key = models.CharField(
-        max_length=64, unique=True, db_index=True,
-        verbose_name="预训练键", help_text="origin-destination-YYYYMMDDHHMMSS"
+    # 训练结果：成功/失败
+    success = models.BooleanField(default=True, verbose_name="训练是否成功")
+    # 是否采用预训练模型
+    use_pretrain = models.BooleanField(
+        default=False,
+        verbose_name="是否采用该预训练模型",
+        help_text="标记该航线预测模型是否基于预训练模型"
     )
 
-    def generate_pretrain_key(self, suffix: Optional[int] = None) -> str:
-        dt = self.train_datetime or timezone.now()
-        base = f"{self.origin}-{self.destination}-{dt.strftime('%Y%m%d%H%M%S')}"
-        return f"{base}-{suffix}" if suffix else base
-
-    def save(self, *args, **kwargs):
-        # 确保有 train_datetime（没有就用当前时间）
-        if not self.train_datetime:
-            self.train_datetime = timezone.now()
-
-        # 若未给 pretrain_key，就自动生成；若唯一键冲突，自动加后缀重试
-        if not self.pretrain_key:
-            attempt = 0
-            while True:
-                self.pretrain_key = self.generate_pretrain_key(None if attempt == 0 else attempt)
-                try:
-                    with transaction.atomic():
-                        return super().save(*args, **kwargs)
-                except IntegrityError:
-                    attempt += 1
-                    if attempt > 9:  # 最多尝试 10 次（足够应对同秒并发）
-                        raise
-        else:
-            return super().save(*args, **kwargs)
 
     class Meta:
         verbose_name = "预训练记录"

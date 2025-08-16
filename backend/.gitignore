@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# 忽略 predict 下的迁移文件
+/backend/predict/migrations/
+
 # Distribution / packaging
 .Python
 build/

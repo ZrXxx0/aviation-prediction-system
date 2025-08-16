@@ -320,8 +320,8 @@ def run_import(base_dir: str, dry_run: bool = False):
 # ========= 入口 =========
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="导入 AirlineModels 到 RouteModelInfo")
-    parser.add_argument("--base", type=str, default=os.path.join(PROJECT_ROOT, "AirlineModels"),
-                        help="AirlineModels 根目录")
+    parser.add_argument("--base", type=str, default=os.path.join(PROJECT_ROOT, "AirlineModels", "Existing_Models"),
+                        help="AirlineModels/Existing_Models 根目录")
     parser.add_argument("--dry-run", action="store_true", help="只打印不入库")
     args = parser.parse_args()
 
