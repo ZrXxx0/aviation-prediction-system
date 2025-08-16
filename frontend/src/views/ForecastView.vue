@@ -40,12 +40,25 @@
         <!-- 选择模型 -->
         <div class="form-group">
           <label>选择模型</label>
-          <el-select v-model="modelType" placeholder="选择模型" class="large-select">
-            <el-option label="选择最优模型" value="选择最优模型" />
-            <el-option label="ARIMA" value="ARIMA" />
-            <el-option label="LSTM" value="LSTM" />
-            <el-option label="Prophet" value="Prophet" />
+          <el-select v-model="modelType" placeholder="选择模型" class="large-select" :disabled="loadingModels || !models.length">
+            <el-option
+              v-for="m in models"
+              :key="m.model_id"
+              :label="m.model_id"
+              :value="m.model_id"
+            >
+              <template #default>
+                <el-tooltip
+                  effect="dark"
+                  placement="right"
+                  :content="`MAE: ${m.test_mae}, RMSE: ${m.test_rmse}, MAPE: ${m.test_mape}, R²: ${m.test_r2}`"
+                >
+                  <span>{{ m.model_id }}</span>
+                </el-tooltip>
+              </template>
+            </el-option>
           </el-select>
+          <div v-if="loadingModels" style="margin-top:6px; font-size:12px; color:#999;">加载模型中...</div>
         </div>
 
         <!-- 按钮行 -->
@@ -86,10 +99,11 @@
             :header-cell-style="{background:'#f5f7fa'}"
           >
             <el-table-column prop="route" label="航线" min-width="180" />
-            <el-table-column prop="model" label="模型" width="150" />
-            <el-table-column prop="r2" label="R²" width="100" />
-            <el-table-column prop="mape" label="MAPE (%)" width="100" />
-            <el-table-column prop="rmse" label="RMSE" width="120" />
+            <el-table-column prop="model" label="模型" min-width="150" />
+            <el-table-column prop="mae" label="MAE" min-width="100" />
+            <el-table-column prop="rmse" label="RMSE" min-width="100" />
+            <el-table-column prop="mape" label="MAPE (%)" min-width="100" />
+            <el-table-column prop="r2" label="R²" min-width="100" />
           </el-table>
           <div v-else class="empty-wrap">
             <el-empty description="暂无预测结果" />
@@ -103,22 +117,63 @@
 <script setup>
 import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as echarts from 'echarts'
+import axios from 'axios'
 
 const cities = ['北京', '上海', '广州', '深圳', '成都', '杭州']
 const selectedFrom = ref('')
 const selectedTo = ref('')
 const timeRange = ref('月度')
 const numFeatures = ref(3)
-const modelType = ref('ARIMA')
+const modelType = ref('')
+const models = ref([])
+const loadingModels = ref(false)
 const showTrain = ref(true)
-const isConfigured = ref(false) // Track if timeRange and numFeatures have been configured
+const isConfigured = ref(false)
 const tasks = ref([])
 const performanceTable = ref([])
 
 const chartRef = ref(null)
 let chartInstance = null
 
-// 检查输入是否完整
+watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, granularity, length]) => {
+  if (!from || !to || !granularity || !length) {
+    models.value = []
+    modelType.value = ''   // 清空选择的模型
+    return
+  }
+
+  const granularityMap = { '年度': 'yearly', '季度': 'quarterly', '月度': 'monthly' }
+  const mappedGranularity = granularityMap[granularity] || 'monthly'
+
+  loadingModels.value = true
+  try {
+    // 真实请求
+    // const res = await axios.get(`/predict/forecast/models/`, {
+    //   params: {
+    //     origin_airport: from,
+    //     destination_airport: to,
+    //     time_granularity: mappedGranularity
+    //   }
+    // })
+    // if (res.data.success) {
+    //   models.value = res.data.data.models
+    // }
+
+    // ==== 模拟返回数据 ====
+    models.value = [
+      {"model_id": "CAN_PEK_20250813233015", "train_mae": 33651.78, "train_rmse": 41485.83, "train_mape": 0.02, "train_r2": 1.0, "test_mae": 66841.01, "test_rmse": 67048.82, "test_mape": 0.05, "test_r2": -2.6, "train_start_time": "2011-01-01", "train_end_time": "2024-01-01", "composite_score": 0.3998}]
+    
+    modelType.value = ''   // 每次重新获取模型列表时清空选择
+  } catch (err) {
+    console.error('获取模型失败:', err)
+    models.value = []
+    modelType.value = ''
+  } finally {
+    loadingModels.value = false
+  }
+})
+
+// 检查输入
 function validateInputs() {
   if (!selectedFrom.value || !selectedTo.value || !timeRange.value || !numFeatures.value || !modelType.value) {
     alert('请完整配置起点、终点、时间粒度、时间长度和模型')
@@ -131,12 +186,10 @@ function validateInputs() {
   return true
 }
 
-// 添加预测任务
+// 添加任务
 function addTask() {
   if (!validateInputs()) return
-  if (!isConfigured.value) {
-    isConfigured.value = true // Mark configuration as done after the first task
-  }
+  if (!isConfigured.value) isConfigured.value = true
   const exists = tasks.value.some(r => r.from === selectedFrom.value && r.to === selectedTo.value)
   if (!exists) {
     tasks.value.push({
@@ -147,118 +200,12 @@ function addTask() {
   }
 }
 
-// 删除预测任务
+// 删除任务
 function removeTask(index) {
   tasks.value.splice(index, 1)
   if (tasks.value.length === 0) {
-    isConfigured.value = false // Reset configuration if all tasks are removed
+    isConfigured.value = false
   }
-}
-
-// 生成日期标签
-function generateDateLabels(trainLen, predictLen, timeRange) {
-  const baseDate = getBaseDate()
-  const totalLen = trainLen + predictLen
-  let labels = []
-
-  for (let i = 0; i < totalLen; i++) {
-    let date
-    if (timeRange === '年度') {
-      date = new Date(baseDate.getFullYear() - totalLen + i + 1, 0, 1)
-      labels.push(`${date.getFullYear()}年`)
-    } else if (timeRange === '季度') {
-      const curYear = baseDate.getFullYear()
-      const curMonth = baseDate.getMonth()
-      const curQuarter = Math.floor(curMonth / 3) + 1
-      const startQuarterNum = (curYear * 4 + curQuarter) - totalLen + i + 1
-      const year = Math.floor(startQuarterNum / 4)
-      let quarter = startQuarterNum % 4
-      if (quarter === 0) {
-        quarter = 4
-      }
-      labels.push(`${year}Q${quarter}`)
-    } else {
-      date = addMonths(baseDate, i - totalLen)
-      labels.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
-    }
-  }
-  return labels
-}
-
-// 获取基础日期
-function getBaseDate() {
-  const d = new Date()
-  d.setDate(1)
-  d.setHours(0, 0, 0, 0)
-  return d
-}
-
-// 增加月份
-function addMonths(date, months) {
-  const d = new Date(date)
-  d.setMonth(d.getMonth() + months)
-  return d
-}
-
-// 模拟API请求
-function mockApiRequest() {
-  return new Promise(resolve => {
-    setTimeout(() => {
-      const trainLen = 5
-      const predictLen = numFeatures.value
-      const totalLen = trainLen + predictLen
-
-      const allLabels = generateDateLabels(trainLen, predictLen, timeRange.value)
-      const labelsToShow = showTrain.value ? allLabels : allLabels.slice(trainLen)
-
-      const series = []
-      const performance = []
-
-      tasks.value.forEach(task => {
-        const trainData = Array.from({ length: trainLen }, () => Math.round(Math.random() * 800 + 200))
-        const predictData = Array.from({ length: predictLen }, () => Math.round(Math.random() * 800 + 200))
-
-        if (showTrain.value) {
-          series.push({
-            name: `${task.from} → ${task.to} (${task.modelType})`, // Modified legend name to include model
-            type: 'line',
-            smooth: true,
-            data: [...trainData, ...Array(predictLen).fill(null)],
-            lineStyle: { type: 'solid' }
-          })
-          series.push({
-            name: `${task.from} → ${task.to} (${task.modelType})`, // Modified legend name to include model
-            type: 'line',
-            smooth: true,
-            data: [...Array(trainLen).fill(null), ...predictData],
-            lineStyle: { type: 'dashed' }
-          })
-        } else {
-          series.push({
-            name: `${task.from} → ${task.to} (${task.modelType})`, // Modified legend name to include model
-            type: 'line',
-            smooth: true,
-            data: predictData,
-            lineStyle: { type: 'solid' }
-          })
-        }
-
-        performance.push({
-          route: `${task.from} → ${task.to}`,
-          model: task.modelType,
-          r2: (Math.random() * 0.3 + 0.7).toFixed(3),
-          mape: (Math.random() * 10 + 5).toFixed(2),
-          rmse: (Math.random() * 50 + 100).toFixed(2)
-        })
-      })
-
-      resolve({
-        timeLabels: labelsToShow,
-        series,
-        performance
-      })
-    }, 800)
-  })
 }
 
 // 渲染图表
@@ -269,14 +216,36 @@ function renderChart(timeLabels = [], seriesData = []) {
 
   if (!seriesData.length) {
     chartInstance.setOption({
-      graphic: [{ type: 'text', left: 'center', top: 'center', style: { text: '暂无预测结果', fontSize: 18, fill: '#9aa4ad' } }]
+      graphic: [{
+        type: 'text',
+        left: 'center',
+        top: 'center',
+        style: { text: '暂无预测结果', fontSize: 18, fill: '#9aa4ad' }
+      }]
     })
     return
   }
 
   chartInstance.setOption({
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-    legend: { type: 'scroll', data: [...new Set(seriesData.map(s => s.name))], bottom: 0 },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      formatter: function (params) {
+        const time = params[0].axisValue
+        let tooltipText = time + '<br/>'
+        params.forEach(p => {
+          if (p.data != null) { // 只显示有值的点
+            tooltipText += `<span style="display:inline-block;width:10px;height:10px;background-color:${p.color};margin-right:5px;border-radius:50%"></span> ${p.seriesName}: ${p.data}<br/>`
+          }
+        })
+        return tooltipText
+      }
+    },
+    legend: {
+      type: 'scroll',
+      data: [...new Set(seriesData.map(s => s.name))],
+      bottom: 0
+    },
     grid: { left: '3%', right: '4%', bottom: '12%', containLabel: true },
     xAxis: { type: 'category', data: timeLabels, axisLabel: { rotate: 0 } },
     yAxis: { type: 'value' },
@@ -284,22 +253,145 @@ function renderChart(timeLabels = [], seriesData = []) {
   })
 }
 
+// 运行预测
 async function runForecast() {
   if (!tasks.value.length) {
     alert('请先添加至少一条预测任务')
     return
   }
 
-  const { timeLabels, series, performance } = await mockApiRequest()
-  renderChart(timeLabels, series)
-  performanceTable.value = performance
+  try {
+    // 真实请求
+    // const res = await axios.post(`/predict/forecast/run`, { tasks: tasks.value })
+    // if (res.data.success) {
+    // }
+    // ==== 静态模拟返回数据 ====
+    const res = {
+      success: true,
+      data: [
+        {
+          model_info: {
+            origin_airport: "CAN",
+            destination_airport: "PEK",
+            model_id: "CAN_PEK_20250813233015",
+            model_type: "lgb",
+            train_mae: 33651.78,
+            train_rmse: 41485.83,
+            train_mape: 0.02,
+            train_r2: 1.0,
+            test_mae: 66841.01,
+            test_rmse: 67048.82,
+            test_mape: 0.05,
+            test_r2: -2.6
+          },
+          prediction_results: {
+            historical_data: [
+              { time_point: "2024-01", value: 7645 },
+              { time_point: "2024-02", value: 28280 },
+              { time_point: "2024-03", value: 8280 },
+              { time_point: "2024-04", value: 9280 },
+              { time_point: "2024-05", value: 23239 }
+            ],
+            future_predictions: [
+              { time_point: "2024-06", value: 23395 },
+              { time_point: "2024-07", value: 25165 },
+              { time_point: "2024-08", value: 7187 }
+            ]
+          }
+        },
+        {
+          model_info: {
+            origin_airport: "CAN",
+            destination_airport: "PVG",
+            model_id: "CAN_PVG_20250813233021",
+            model_type: "lgb",
+            train_mae: 2818.41,
+            train_rmse: 5937.08,
+            train_mape: 0.03,
+            train_r2: 0.99,
+            test_mae: 66757.35,
+            test_rmse: 73711.61,
+            test_mape: 0.29,
+            test_r2: -3.31
+          },
+          prediction_results: {
+            historical_data: [
+              { time_point: "2024-01", value: 14222 },
+              { time_point: "2024-02", value: 13837 },
+              { time_point: "2024-03", value: 14837 },
+              { time_point: "2024-04", value: 16837 },
+              { time_point: "2024-05", value: 14932 }
+            ],
+            future_predictions: [
+              { time_point: "2024-06", value: 8526 },
+              { time_point: "2024-07", value: 3518 },
+              { time_point: "2024-08", value: 9173 }
+            ]
+          }
+        }
+      ]
+    }
+
+    const allSeries = []
+    let xLabels = []
+    const performance = []
+
+    res.data.forEach(item => {
+      const { origin_airport, destination_airport, model_type, test_mae, test_rmse, test_mape, test_r2 } = item.model_info
+      const hist = item.prediction_results.historical_data.map(d => ({ ...d, type: 'train' }))
+      const pred = item.prediction_results.future_predictions.map(d => ({ ...d, type: 'predict' }))
+      const allData = [...hist, ...pred]
+
+      const labels = allData.map(d => d.time_point)
+      xLabels = showTrain.value ? labels : pred.map(d => d.time_point)
+
+      if (showTrain.value) {
+        allSeries.push({
+          name: `${origin_airport}→${destination_airport} (${model_type})`,
+          type: 'line',
+          smooth: true,
+          data: [...hist.map(d => d.value), ...Array(pred.length).fill(null)],
+          lineStyle: { type: 'solid' }
+        })
+        allSeries.push({
+          name: `${origin_airport}→${destination_airport} (${model_type})`,
+          type: 'line',
+          smooth: true,
+          data: [...Array(hist.length).fill(null), ...pred.map(d => d.value)],
+          lineStyle: { type: 'dashed' }
+        })
+      } else {
+        allSeries.push({
+          name: `${origin_airport}→${destination_airport} (${model_type})`,
+          type: 'line',
+          smooth: true,
+          data: pred.map(d => d.value),
+          lineStyle: { type: 'solid' }
+        })
+      }
+
+      performance.push({
+        route: `${origin_airport} → ${destination_airport}`,
+        model: model_type,
+        mae: test_mae,
+        rmse: test_rmse,
+        mape: test_mape,
+        r2: test_r2
+      })
+    })
+
+    renderChart(xLabels, allSeries)
+    performanceTable.value = performance
+
+  } catch (err) {
+    console.error('预测失败:', err)
+  }
 }
 
 watch(showTrain, async () => {
-  if (!tasks.value.length) return
-  const { timeLabels, series, performance } = await mockApiRequest()
-  renderChart(timeLabels, series)
-  performanceTable.value = performance
+  if (performanceTable.value.length) {
+    runForecast()
+  }
 })
 
 onMounted(() => {
@@ -418,7 +510,7 @@ onBeforeUnmount(() => {
   padding: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   max-width: 100%;
-  overflow-x: auto;
+  overflow-x: auto;  
 }
 
 .stat-card h3 {
