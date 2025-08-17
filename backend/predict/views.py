@@ -3,7 +3,7 @@ import pickle
 import json
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from django.shortcuts import render
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
@@ -12,6 +12,12 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ObjectDoesNotExist
+
+from .models import RouteModelInfo, PretrainRecord
+from show.models import AirportInfo
+from .predictive_algorithm.pretrain_single_route import pretrain_single_route
+from .predictive_algorithm.predict_single_route import predict_single_route
+from .predictive_algorithm.fromal_train_single_route import formal_train_single_route
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -22,10 +28,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 predictive_algorithm_dir = os.path.join(current_dir, 'predictive_algorithm')
 if predictive_algorithm_dir not in sys.path:
     sys.path.insert(0, predictive_algorithm_dir)
-
-from .predictive_algorithm.predict import forecast_from_files
-from .models import RouteModelInfo
-from show.models import AirportInfo
 
 
 
@@ -48,17 +50,43 @@ def build_info(iata_code: str):
     except ObjectDoesNotExist:
         return {"code": iata_code, "city": None, "province": None, "airport": None}
 
-def _fmt_label(dt_like, granularity: str) -> str:
-    """把日期按粒度转成横轴标签"""
-    d = pd.to_datetime(dt_like, errors="coerce")
-    if pd.isna(d):
-        return str(dt_like)
-    if granularity == "yearly":
-        return f"{d.year}年"
-    if granularity == "quarterly":
-        q = (d.month - 1) // 3 + 1
-        return f"{d.year}-Q{q}"
-    return d.strftime("%Y-%m")
+def clean_nan_values(data_dict):
+    """
+    清理字典中的nan值，将nan替换为None，并确保所有数值都是JSON兼容的
+    """
+    cleaned_data = {}
+    for key, value in data_dict.items():
+        if value is None:
+            cleaned_data[key] = None
+        elif isinstance(value, (int, float)):
+            # 检查是否为nan或inf
+            if hasattr(np, 'isnan') and np.isnan(value):
+                cleaned_data[key] = None
+            elif hasattr(np, 'isinf') and np.isinf(value):
+                cleaned_data[key] = None
+            else:
+                # 确保数值在JSON范围内
+                if value > 1e308 or value < -1e308:
+                    cleaned_data[key] = None
+                else:
+                    cleaned_data[key] = float(value)
+        elif isinstance(value, np.floating):
+            # 处理numpy浮点数
+            if np.isnan(value) or np.isinf(value):
+                cleaned_data[key] = None
+            else:
+                # 转换为Python float并检查范围
+                float_val = float(value)
+                if float_val > 1e308 or float_val < -1e308:
+                    cleaned_data[key] = None
+                else:
+                    cleaned_data[key] = float_val
+        elif isinstance(value, np.integer):
+            # 处理numpy整数
+            cleaned_data[key] = int(value)
+        else:
+            cleaned_data[key] = value
+    return cleaned_data
 
 # 获取预测模型函数
 @require_GET
@@ -280,7 +308,7 @@ def forecast_route_view(request):
         results = []
         for pred in predictions:
             try:
-                result = _execute_single_prediction(pred)
+                result = predict_single_route(pred)
                 results.append(result)
             except Exception as e:
                 # 如果单个预测失败，记录错误但继续处理其他预测
@@ -312,184 +340,473 @@ def forecast_route_view(request):
             'traceback': traceback.format_exc()
         }, status=500)
 
-def _execute_single_prediction(prediction_request):
+
+
+# 模型训练请求处理
+@api_view(['POST'])
+@csrf_exempt
+def pretrain_model_request(request):
     """
-    执行单个预测请求
+    处理模型训练请求的POST接口
     
-    Args:
-        prediction_request: 包含预测参数的字典
-        
-    Returns:
-        包含模型信息和预测结果的字典
+    请求体参数：
+    - origin: 起始机场代码 (如 'CAN')
+    - destination: 目标机场代码 (如 'PEK')
+    - config: 训练配置字典，包含：
+      - time_granularity: 时间粒度 (yearly/quarterly/monthly)
+      - model_type: 模型类型 (lgb/xgb)
+      - test_size: 测试集大小
+      - add_ts_forecast: 是否添加时间序列预测
+      - arima_order: ARIMA参数 (可选)
+      - 其他模型特定参数
+    
+    返回：
+    - 成功：训练结果和创建的数据库记录信息
+    - 失败：错误信息和失败的数据库记录信息
     """
-    
-    origin_airport = prediction_request['origin_airport'].upper()
-    destination_airport = prediction_request['destination_airport'].upper()
-    time_granularity = prediction_request['time_granularity']
-    prediction_periods = prediction_request['prediction_periods']
-    model_id = prediction_request['model_id']
-    
-    # 从数据库获取模型信息
     try:
-        model_info = RouteModelInfo.objects.get(model_id=model_id)
-    except RouteModelInfo.DoesNotExist:
-        raise Exception(f"未找到模型ID: {model_id}")
-    
-    # 验证模型是否匹配请求的航线和时间粒度
-    if (model_info.origin_airport != origin_airport or 
-        model_info.destination_airport != destination_airport or
-        model_info.time_granularity != time_granularity):
-        raise Exception(f"模型 {model_id} 与请求的航线或时间粒度不匹配")
-    
-    # 构建根目录路径 - 使用更可靠的路径构建方法
-    current_dir = os.path.dirname(os.path.abspath(__file__))  # 当前文件所在目录
-    base_dir = os.path.join(os.path.dirname(current_dir), 'AirlineModels')  # 上级目录下的AirlineModels
-    
-    # 加载模型文件
-    model_file_path = os.path.join(base_dir, model_info.model_file_path)
-    preprocessor_file_path = os.path.join(base_dir, model_info.preprocessor_file_path)
-    feature_builder_file_path = os.path.join(base_dir, model_info.feature_builder_file_path)
-    meta_file_path = os.path.join(base_dir, model_info.meta_file_path)
-    raw_data_file_path = os.path.join(base_dir, model_info.raw_data_file_path)
-    
-    # 检查文件是否存在
-    required_files = [model_file_path, preprocessor_file_path, feature_builder_file_path, 
-                     meta_file_path, raw_data_file_path]
-    for file_path in required_files:
-        if not os.path.exists(file_path):
-            raise Exception(f"文件不存在: {file_path}")
-    
-    try:
-        # 加载模型组件
-        with open(model_file_path, "rb") as f:
-            model = pickle.load(f)
+        # 获取请求数据
+        data = request.data
         
-        with open(preprocessor_file_path, "rb") as f:
-            preprocessor = pickle.load(f)
+        # 验证必要参数
+        origin = data.get('origin', '').upper()
+        destination = data.get('destination', '').upper()
+        config = data.get('config', {})
         
-        with open(feature_builder_file_path, "rb") as f:
-            feature_builder = pickle.load(f)
+        if not origin or not destination:
+            return Response({
+                'error': '缺少必要参数',
+                'message': '请提供 origin 和 destination 参数'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        with open(meta_file_path, "r", encoding='utf-8') as f:
-            metadata = json.load(f)
+        if not config:
+            return Response({
+                'error': '缺少配置参数',
+                'message': '请提供训练配置 config'
+            }, status=status.HTTP_400_BAD_REQUEST)
         
-        # 加载原始数据
-        latest_data = pd.read_csv(raw_data_file_path)
-        date_col = metadata.get('date_column', 'YearMonth')
-        latest_data[date_col] = pd.to_datetime(latest_data[date_col])
+        # 验证时间粒度
+        time_granularity = config.get('time_granularity', 'monthly')
+        if time_granularity not in ['yearly', 'quarterly', 'monthly']:
+            return Response({
+                'error': '无效的时间粒度',
+                'message': 'time_granularity 必须是 yearly, quarterly 或 monthly 之一'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 验证模型类型
+        model_type = config.get('model_type', 'lgb')
+        if model_type not in ['lgb', 'xgb']:
+            return Response({
+                'error': '无效的模型类型',
+                'message': 'model_type 必须是 lgb 或 xgb 之一'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        print(f"收到训练请求: {origin} -> {destination}")
+        # print(f"配置: {config}")
+        
+        # 执行模型训练
+        success, result = pretrain_single_route(origin, destination, config)
+        
+        # 准备创建数据库记录的数据
+        record_data = {
+            'origin': origin,
+            'destination': destination,
+            'time_granularity': time_granularity,
+            'step_size': config.get('test_size'),
+            'train_datetime': datetime.now(),
+            'success': success,
+            'use_pretrain': False
+        }
+        
+        # 如果训练成功，添加成功相关的数据
+        if success and isinstance(result, dict):
+            record_data.update({
+                'meta_file_path': result.get('meta_file_path', ''),
+                'train_start_date': result.get('train_start_date'),
+                'train_end_date': result.get('train_end_date'),
+                'train_duration': result.get('train_duration'),
+                'train_mae': result.get('train_mae'),
+                'train_rmse': result.get('train_rmse'),
+                'train_mape': result.get('train_mape'),
+                'train_r2': result.get('train_r2'),
+                'test_mae': result.get('test_mae'),
+                'test_rmse': result.get('test_rmse'),
+                'test_mape': result.get('test_mape'),
+                'test_r2': result.get('test_r2'),
+                'report_pdf': result.get('report_pdf', '')
+            })
+        else:
+            # 训练失败，设置默认值
+            record_data.update({
+                'meta_file_path': '',
+                'train_start_date': datetime.now().date(),
+                'train_end_date': datetime.now().date(),
+                'train_duration': None,
+                'train_mae': None,
+                'train_rmse': None,
+                'train_mape': None,
+                'train_r2': None,
+                'test_mae': None,
+                'test_rmse': None,
+                'test_mape': None,
+                'test_r2': None,
+                'report_pdf': ''
+            })
+        
+        # 清理数据中的nan值
+        record_data = clean_nan_values(record_data)
+        # print(record_data)
+        pretrain_record = PretrainRecord.objects.create(**record_data)
+        
+        # 构建响应数据
+        response_data = {
+            'message': '模型训练请求处理完成',
+            'record_id': pretrain_record.id,
+            'success': True,
+            'record_created': True
+        }
+        
+        if success:
+            # 清理训练结果数据，确保JSON兼容
+            cleaned_result = clean_nan_values(result) if isinstance(result, dict) else result
+            response_data.update({
+                'training_result': cleaned_result,
+                'message': f'航线 {origin}-{destination} 模型训练成功'
+            })
+        else:
+            response_data.update({
+                'error': str(result),
+                'message': f'航线 {origin}-{destination} 模型训练失败'
+            })
+        
+        return Response(response_data, status=status.HTTP_200_OK)
         
     except Exception as e:
+        print(f"处理训练请求时发生错误: {str(e)}")
         import traceback
-        error_msg = f"加载模型文件失败: {str(e)}\n详细错误信息:\n{traceback.format_exc()}"
-        raise Exception(error_msg)
-    
-    # 获取预测所需的信息
-    feature_cols = metadata.get('feature_columns', [])
-    target_col = metadata.get('target_column', 'Seats')
-    last_complete_date = pd.to_datetime(metadata.get('last_complete_date', latest_data[date_col].max()))
-    
-    # 根据时间粒度调整预测期数
-    if time_granularity == 'quarterly':
-        adjusted_periods = prediction_periods
-    elif time_granularity == 'yearly':
-        adjusted_periods = prediction_periods
-    else:
-        adjusted_periods = prediction_periods
-    
-    # 调整最后完整日期到对应的时间粒度
-    if time_granularity == 'quarterly':
-        while last_complete_date.month not in [3, 6, 9, 12]:
-            last_complete_date -= pd.DateOffset(months=1)
-    elif time_granularity == 'yearly':
-        while last_complete_date.month != 12:
-            last_complete_date -= pd.DateOffset(months=1)
-    
-    # 执行预测
-    future_preds = []
-    current_data = latest_data.copy()
-    
-    for i in range(adjusted_periods):
-        # 计算下一个时间点
-        if time_granularity == 'monthly':
-            offset = pd.DateOffset(months=1)
-        elif time_granularity == 'quarterly':
-            offset = pd.DateOffset(months=3)
-        else:  # yearly
-            offset = pd.DateOffset(years=1)
+        traceback.print_exc()
         
-        next_date = last_complete_date + offset
-        
-        # 创建新的数据行
-        next_row = {date_col: next_date}
-        for col in current_data.columns:
-            if col != date_col:
-                next_row[col] = np.nan
-        
-        # 添加新行并处理
-        current_data = pd.concat([current_data, pd.DataFrame([next_row])], ignore_index=True)
-        current_data = preprocessor.fit_transform(current_data)
-        current_data = feature_builder.fit_transform(current_data)
-        
-        # 预测
-        latest_input = current_data.iloc[[-1]][feature_cols]
-        next_pred = model.predict(latest_input)[0]
-        
-        # 更新数据
-        current_data.loc[current_data.index[-1], target_col] = next_pred
-        
-        future_preds.append({
-            'YearMonth': next_date,
-            'Predicted': next_pred
-        })
-        
-        last_complete_date = next_date
+        # 即使发生异常，也尝试创建失败的记录
+        try:
+            record_data = {
+                'origin': data.get('origin', '').upper() if 'data' in locals() else '',
+                'destination': data.get('destination', '').upper() if 'data' in locals() else '',
+                'time_granularity': data.get('config', {}).get('time_granularity', 'monthly') if 'data' in locals() else 'monthly',
+                'step_size': data.get('config', {}).get('test_size', 12) if 'data' in locals() else 12,
+                'train_datetime': datetime.now(),
+                'success': False,
+                'use_pretrain': False,
+                'meta_file_path': '',
+                'train_start_date': datetime.now().date(),
+                'train_end_date': datetime.now().date(),
+                'train_duration': None,
+                'train_mae': None,
+                'train_rmse': None,
+                'train_mape': None,
+                'train_r2': None,
+                'test_mae': None,
+                'test_rmse': None,
+                'test_mape': None,
+                'test_r2': None,
+                'report_pdf': ''
+            }
+
+            # 清理数据中的nan值
+            record_data = clean_nan_values(record_data)
+            pretrain_record = PretrainRecord.objects.create(**record_data)
+            
+            return Response({
+                'error': '系统异常',
+                'message': f'处理训练请求时发生系统异常: {str(e)}',
+                'record_id': pretrain_record.id,
+                'record_created': True,
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            
+        except Exception as record_error:
+            print(f"创建失败记录时也发生错误: {str(record_error)}")
+            return Response({
+                'error': '系统异常',
+                'message': f'处理训练请求时发生系统异常: {str(e)}，且无法创建失败记录',
+                'record_created': False,
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@api_view(['POST'])
+@csrf_exempt
+def formal_train_model(request):
+    """
+    正式训练模型接口
     
-    future_df = pd.DataFrame(future_preds)
+    请求参数：
+    - pretrain_record_id: 预训练模型记录ID
+    - remark: 备注信息（可选）
     
-    # 构建模型信息返回
-    model_info_response = {
-        'model_id': model_info.model_id,
-        'origin_airport': model_info.origin_airport,
-        'destination_airport': model_info.destination_airport,
-        'time_granularity': model_info.time_granularity,
-        'model_type': metadata.get('model_type', 'LightGBM'),
-        'feature_count': len(feature_cols),
-        'training_samples': metadata.get('training_samples', len(latest_data)),
-        'test_samples': metadata.get('test_samples', 0),
-        'train_mae': model_info.train_mae,
-        'train_rmse': model_info.train_rmse,
-        'train_mape': model_info.train_mape,
-        'train_r2': model_info.train_r2,
-        'test_mae': model_info.test_mae,
-        'test_rmse': model_info.test_rmse,
-        'test_mape': model_info.test_mape,
-        'test_r2': model_info.test_r2,
-        'train_start_time': model_info.train_start_time.strftime('%Y-%m-%d') if model_info.train_start_time else None,
-        'train_end_time': model_info.train_end_time.strftime('%Y-%m-%d') if model_info.train_end_time else None,
-        'last_complete_date': metadata.get('last_complete_date')
-    }
-    
-    # 构建历史数据
-    historical_data = []
-    for _, row in latest_data.iterrows():
-        historical_data.append({
-            'time_point': _fmt_label(row[date_col], time_granularity),
-            'value': int(row[target_col]) if pd.notna(row[target_col]) else None
-        })
-    
-    # 构建未来预测数据
-    future_predictions = []
-    for _, row in future_df.iterrows():
-        future_predictions.append({
-            'time_point': _fmt_label(row['YearMonth'], time_granularity),
-            'value': int(row['Predicted']) if pd.notna(row['Predicted']) else None
-        })
-    
-    # 返回结果
-    return {
-        'model_info': model_info_response,
-        'prediction_results': {
-            'historical_data': historical_data,
-            'future_predictions': future_predictions
+    流程：
+    1. 根据预训练模型ID查找PretrainRecord
+    2. 提取origin, destination, meta_file_path, time_granularity和8个指标参数
+    3. 调用formal_train_single_route函数进行训练
+    4. 成功时创建RouteModelInfo记录并更新PretrainRecord的use_pretrain为True
+    5. 失败时返回错误信息，不修改数据库
+    """
+    try:
+        # 获取请求参数
+        pretrain_record_id = request.data.get('pretrain_record_id')
+        remark = request.data.get('remark', '')  # 备注可以为空
+        
+        # 参数验证
+        if not pretrain_record_id:
+            return Response({
+                'error': '缺少必要参数',
+                'message': '请提供 pretrain_record_id 参数'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 查找预训练记录
+        try:
+            pretrain_record = PretrainRecord.objects.get(id=pretrain_record_id)
+        except PretrainRecord.DoesNotExist:
+            return Response({
+                'error': '预训练记录不存在',
+                'message': f'ID为 {pretrain_record_id} 的预训练记录不存在'
+            }, status=status.HTTP_404_NOT_FOUND)
+        
+        # 检查预训练记录是否成功
+        if not pretrain_record.success:
+            return Response({
+                'error': '预训练记录状态异常',
+                'message': f'预训练记录 {pretrain_record_id} 训练状态为失败，无法用于正式训练'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # 提取预训练记录中的参数
+        origin = pretrain_record.origin
+        destination = pretrain_record.destination
+        meta_file_path = pretrain_record.meta_file_path
+        time_granularity = pretrain_record.time_granularity
+        
+        # 提取8个评估指标
+        train_metrics = {
+            'train_mae': pretrain_record.train_mae,
+            'train_rmse': pretrain_record.train_rmse,
+            'train_mape': pretrain_record.train_mape,
+            'train_r2': pretrain_record.train_r2,
+            'test_mae': pretrain_record.test_mae,
+            'test_rmse': pretrain_record.test_rmse,
+            'test_mape': pretrain_record.test_mape,
+            'test_r2': pretrain_record.test_r2,
         }
-    }
+        
+        # 设置模型类型（这里假设为lgb，可以根据需要调整）
+        model_type = 'lgb'
+        
+        print(f"开始正式训练模型: {origin}-{destination}, 时间粒度: {time_granularity}")
+        # print(f"使用预训练元数据: {meta_file_path}")
+        
+        success, result = formal_train_single_route(
+            origin=origin,
+            destination=destination,
+            time_granularity=time_granularity,
+            model_type=model_type,
+            pretrained_metadata_path=meta_file_path
+        )
+        
+        if success:
+            # 训练成功，创建RouteModelInfo记录
+            try:
+                # 创建RouteModelInfo记录
+                model_id = result["model_id"]
+                
+                # 准备创建记录的数据
+                route_model_data = {
+                    'model_id': model_id,
+                    'origin_airport': origin,
+                    'destination_airport': destination,
+                    'time_granularity': time_granularity,
+                    'train_start_time': result['train_start_time'],
+                    'train_end_time': result['train_end_time'],
+                    'train_datetime': result['train_datetime'],
+                    'meta_file_path': result['meta_file_path'],
+                    'model_file_path': result['model_file_path'],
+                    'raw_data_file_path': result['raw_data_file_path'],
+                    'preprocessor_file_path': result['preprocessor_file_path'],
+                    'feature_builder_file_path': result['feature_builder_file_path'],
+                    # 8个评估指标
+                    'train_mae': train_metrics['train_mae'],
+                    'train_rmse': train_metrics['train_rmse'],
+                    'train_mape': train_metrics['train_mape'],
+                    'train_r2': train_metrics['train_r2'],
+                    'test_mae': train_metrics['test_mae'],
+                    'test_rmse': train_metrics['test_rmse'],
+                    'test_mape': train_metrics['test_mape'],
+                    'test_r2': train_metrics['test_r2'],
+                    'remark': remark,
+                    'pretrain_record': pretrain_record
+                }
+                
+                # 清理数据中的nan值
+                route_model_data = clean_nan_values(route_model_data)
+                
+                route_model_info = RouteModelInfo.objects.create(**route_model_data)
+                
+                # 更新PretrainRecord的use_pretrain为True
+                pretrain_record.use_pretrain = True
+                pretrain_record.save()
+                
+                # print(f"正式训练成功！创建RouteModelInfo记录: {model_id}")
+                
+                return Response({
+                    'success': True,
+                    'message': f'航线 {origin}-{destination} 正式训练成功',
+                    'model_id': model_id,
+                    'route_model_info_id': route_model_info.model_id,
+                    'pretrain_record_updated': True
+                }, status=status.HTTP_200_OK)
+                
+            except Exception as create_error:
+                print(f"创建RouteModelInfo记录时发生错误: {str(create_error)}")
+                import traceback
+                traceback.print_exc()
+                
+                return Response({
+                    'error': '数据库操作失败',
+                    'message': f'模型训练成功，但创建数据库记录失败: {str(create_error)}',
+                    'training_success': True,
+                    'database_operation_failed': True
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+        else:
+            # 训练失败
+            print(f"正式训练失败: {result}")
+            
+            return Response({
+                'error': '模型训练失败',
+                'message': f'航线 {origin}-{destination} 正式训练失败: {result}',
+                'training_success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+            
+    except Exception as e:
+        print(f"处理正式训练请求时发生错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        return Response({
+            'error': '系统异常',
+            'message': f'处理正式训练请求时发生系统异常: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+
+@require_GET
+def get_pretrain_models(request):
+    """
+    获取预训练成功的模型列表
+    
+    参数：
+    - origin_airport: 起点机场三字码（可选）
+    - destination_airport: 终点机场三字码（可选）
+    - time_granularity: 时间粒度 (yearly/quarterly/monthly)（可选）
+    
+    返回：
+    - 预训练成功的模型列表，每个模型包含：
+      - 基本信息：ID、起终点、时间粒度、训练时间等
+      - 训练结果指标：训练集和测试集的评估指标
+      - 是否被采用为正式模型
+    """
+    try:
+        # 获取查询参数
+        origin_airport = request.GET.get('origin_airport', '').upper()
+        destination_airport = request.GET.get('destination_airport', '').upper()
+        time_granularity = request.GET.get('time_granularity', '')
+        
+        # 构建查询条件
+        query_filters = {'success': True}  # 只要预训练成功的模型
+        
+        if origin_airport:
+            query_filters['origin'] = origin_airport
+            
+        if destination_airport:
+            query_filters['destination'] = destination_airport
+            
+        if time_granularity:
+            if time_granularity not in ['yearly', 'quarterly', 'monthly']:
+                return JsonResponse({
+                    'error': '无效的时间粒度',
+                    'message': 'time_granularity 必须是 yearly, quarterly 或 monthly 之一'
+                }, status=400)
+            query_filters['time_granularity'] = time_granularity
+        
+        # 查询预训练成功的模型
+        pretrain_models = PretrainRecord.objects.filter(**query_filters).order_by('-train_datetime')
+        
+        if not pretrain_models.exists():
+            return JsonResponse({
+                'message': '未找到符合条件的预训练模型',
+                'models': [],
+                'count': 0
+            }, status=200)
+        
+        # 构建返回数据
+        models_data = []
+        for model in pretrain_models:
+            model_info = {
+                # 基本信息
+                'id': model.id,
+                'origin': model.origin,
+                'destination': model.destination,
+                'time_granularity': model.time_granularity,
+                'train_start_date': model.train_start_date.strftime('%Y-%m-%d') if model.train_start_date else None,
+                'train_end_date': model.train_end_date.strftime('%Y-%m-%d') if model.train_end_date else None,
+                'train_datetime': model.train_datetime.strftime('%Y-%m-%d %H:%M:%S') if model.train_datetime else None,
+                'train_duration': str(model.train_duration) if model.train_duration else None,
+                'report_pdf': model.report_pdf,
+                'created_at': model.created_at.strftime('%Y-%m-%d %H:%M:%S') if model.created_at else None,
+                
+                # 训练结果指标
+                'train_metrics': {
+                    'mae': model.train_mae,
+                    'rmse': model.train_rmse,
+                    'mape': model.train_mape,
+                    'r2': model.train_r2
+                },
+                'test_metrics': {
+                    'mae': model.test_mae,
+                    'rmse': model.test_rmse,
+                    'mape': model.test_mape,
+                    'r2': model.test_r2
+                },
+                
+                # 是否被采用为正式模型
+                'is_adopted': model.use_pretrain,
+                
+                # 模型状态
+                'success': model.success
+            }
+            
+            models_data.append(model_info)
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'成功获取 {len(models_data)} 个预训练模型',
+            'models': models_data,
+            'count': len(models_data),
+            'filters_applied': {
+                'origin_airport': origin_airport if origin_airport else None,
+                'destination_airport': destination_airport if destination_airport else None,
+                'time_granularity': time_granularity if time_granularity else None
+            }
+        }, status=200)
+        
+    except Exception as e:
+        print(f"获取预训练模型列表时发生错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        
+        return JsonResponse({
+            'error': '系统异常',
+            'message': f'获取预训练模型列表时发生系统异常: {str(e)}'
+        }, status=500)
+
+
+
+

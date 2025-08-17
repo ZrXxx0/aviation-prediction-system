@@ -14,7 +14,7 @@ class BaseTSModel:
 
 class ARIMAModel(BaseTSModel):
     """ARIMA 时间序列模型实现"""
-    def __init__(self, order=(1, 0, 0), freq=None):
+    def __init__(self, order=(1, 0, 0),  freq=None):
         self.order = order
         self.model = None
         self.last_training_date = None

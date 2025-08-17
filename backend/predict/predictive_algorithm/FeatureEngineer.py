@@ -10,7 +10,7 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.holtwinters import Holt
 import warnings
 
-from time_granularity import TimeGranularityController
+from .time_granularity import TimeGranularityController
 
 
 class DataPreprocessor(BaseEstimator, TransformerMixin):
@@ -85,6 +85,12 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             
         X_filled = X.copy()
         time_series = pd.to_datetime(X_filled[self.time_col])
+        
+        # 数据类型转换：确保数值列为float类型，避免decimal.Decimal类型问题
+        for col in X_filled.columns:
+            if col != self.time_col and col not in self.binary_columns:
+                # 将数值列转换为float类型
+                X_filled[col] = pd.to_numeric(X_filled[col], errors='coerce')
         
         # 第一步：将0值转换为NaN（0-1列除外）
         for col in X.columns:
@@ -250,7 +256,11 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
                 weights = np.linspace(0.1, 1.0, n)  # 线性权重
                 weights /= weights.sum()  # 归一化
                 last_values = fit_data.iloc[-n:]
-                predicted = [np.average(last_values, weights=weights)] * forecast_steps
+                
+                # 确保数据类型为float，避免decimal.Decimal类型问题
+                last_values_float = last_values.astype(float)
+                
+                predicted = [np.average(last_values_float, weights=weights)] * forecast_steps
             else:
                 # 默认使用简单指数平滑
                 model = SimpleExpSmoothing(fit_data.values)
@@ -323,7 +333,11 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             elif self.non_economic_model == 'sarima':
                 order = self.model_params.get('sarima', {}).get('order', (1,1,1))
                 seasonal_order = self.model_params.get('sarima', {}).get('seasonal_order', (1,1,1,12))
-                model = SARIMAX(fit_data.values, 
+                
+                # 确保数据类型为float，避免decimal.Decimal类型问题
+                fit_data_float = fit_data.astype(float)
+                
+                model = SARIMAX(fit_data_float.values, 
                               order=order, 
                               seasonal_order=seasonal_order)
                 model_fit = model.fit(disp=False)
@@ -331,13 +345,19 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             
             # Holt-Winters三参数指数平滑
             elif self.non_economic_model == 'holt':
-                model = Holt(fit_data.values)
+                # 确保数据类型为float，避免decimal.Decimal类型问题
+                fit_data_float = fit_data.astype(float)
+                
+                model = Holt(fit_data_float.values)
                 model_fit = model.fit()
                 predicted = model_fit.forecast(steps=forecast_steps)
             
             # 简单指数平滑
             elif self.non_economic_model == 'ses':
-                model = SimpleExpSmoothing(fit_data.values)
+                # 确保数据类型为float，避免decimal.Decimal类型问题
+                fit_data_float = fit_data.astype(float)
+                
+                model = SimpleExpSmoothing(fit_data_float.values)
                 model_fit = model.fit()
                 predicted = model_fit.forecast(forecast_steps)
             
@@ -347,7 +367,11 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
                 weights = np.linspace(0.1, 1.0, n)
                 weights /= weights.sum()
                 last_values = fit_data.iloc[-n:]
-                predicted = [np.average(last_values, weights=weights)] * forecast_steps
+                
+                # 确保数据类型为float，避免decimal.Decimal类型问题
+                last_values_float = last_values.astype(float)
+                
+                predicted = [np.average(last_values_float, weights=weights)] * forecast_steps
             
             # 应用预测结果
             if forecast_steps < num_missing:
@@ -371,7 +395,11 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             weights = np.linspace(0.5, 1, n)
             weights /= weights.sum()
             last_values = fit_data.iloc[-n:]
-            fill_value = np.average(last_values, weights=weights)
+            
+            # 确保数据类型为float，避免decimal.Decimal类型问题
+            last_values_float = last_values.astype(float)
+            
+            fill_value = np.average(last_values_float, weights=weights)
         else:
             # 无有效数据时使用列统计，这里无法获取列名，使用默认值
             fill_value = 0
@@ -570,12 +598,12 @@ class AirlineRouteModel:
         data = self.get_route_data(origin, destination)
         # data.to_csv(f'./result/{origin}_{destination}_all_data.csv', index=False)
 
-        # 调整测试集大小（按粒度转换）
-        if self.granularity_controller.granularity == 'quarterly':
-            test_size = min(2*3, test_size)  # 至少2个季度 还是按照月度走
-        elif self.granularity_controller.granularity == 'yearly':
-            # test_size = max(1, test_size // 12)  # 至少1年
-            test_size = 0  # 不使用测试集
+        # # 调整测试集大小（按粒度转换）
+        # if self.granularity_controller.granularity == 'quarterly':
+        #     test_size = min(2*3, test_size)  # 至少2个季度 还是按照月度走
+        # elif self.granularity_controller.granularity == 'yearly':
+        #     # test_size = max(1, test_size // 12)  # 至少1年
+        #     test_size = 0  # 不使用测试集
         
         # 数据预处理
         data_preprocessed = self.preprocessor.fit_transform(data)
