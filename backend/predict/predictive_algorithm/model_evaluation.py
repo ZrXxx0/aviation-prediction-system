@@ -32,12 +32,12 @@ class ModelEvaluator:
     def calculate_metrics(self):
         """计算全部评估指标"""
         self.metrics = {
-            'RMSE': np.sqrt(mean_squared_error(self.y_true, self.y_pred)),
-            'MAE': mean_absolute_error(self.y_true, self.y_pred),
-            'MAPE': mean_absolute_percentage_error(self.y_true, self.y_pred),
-            'R²': r2_score(self.y_true, self.y_pred)
+            'rmse': np.sqrt(mean_squared_error(self.y_true, self.y_pred)),
+            'mae': mean_absolute_error(self.y_true, self.y_pred),
+            'mape': mean_absolute_percentage_error(self.y_true, self.y_pred),
+            'r2': r2_score(self.y_true, self.y_pred)
         }
-        return self
+        return self.metrics
 
     def report(self, name="Test", return_str=False):
         """生成评估报告"""
@@ -46,9 +46,9 @@ class ModelEvaluator:
         else:
             print(f"\n{name} Metrics:")
             for k, v in self.metrics.items():
-                if k in ['MAPE', 'sMAPE']:
+                if k in ['mape', 'smape']:
                     print(f"{k}: {v:.2%}")
-                elif k == 'R²':
+                elif k == 'r2':
                     print(f"{k}: {v:.4f}")
                 else:
                     print(f"{k}: {v:.2f}")
