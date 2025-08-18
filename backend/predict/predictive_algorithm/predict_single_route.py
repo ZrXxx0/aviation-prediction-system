@@ -116,7 +116,7 @@ def predict_single_route(prediction_request):
 
     # 调整最后完整日期到对应的时间粒度
     if time_granularity == 'quarterly':
-        while last_complete_date.month not in [3, 6, 9, 12]:
+        while last_complete_date.month not in [1, 4, 7, 10]:
             last_complete_date -= pd.DateOffset(months=1)
     elif time_granularity == 'yearly':
         while last_complete_date.month != 12:

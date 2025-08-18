@@ -13,7 +13,6 @@ import warnings
 from predict.predictive_algorithm.time_granularity import TimeGranularityController
 
 
-
 class DataPreprocessor(BaseEstimator, TransformerMixin):
     """智能数据预处理类，区分经济数据列和其他列使用不同的尾部填充策略"""
     def __init__(self, fill_method='interp', max_invalid_ratio=1, min_fit_points=5, 
@@ -579,17 +578,23 @@ class AirlineRouteModel:
         
         route_data = (route_data.drop(columns=cols_to_drop, errors='ignore')
                                 .drop_duplicates()
-                                .query("YearMonth not in ['2024-06', '2024-07']")  # 这个得想办法解决了！
                                 .assign(YearMonth=lambda df: pd.to_datetime(df['YearMonth']))
                                 .sort_values(self.date_col)
                                 .reset_index(drop=True)
         )
+        # 在重采样前记录原始数据的最后一个月，用于判断季度/年份是否完整
+        original_last_date = route_data[self.date_col].max()
         route_data = self.granularity_controller.resample_data(route_data)
-         # 移除最后可能不完整的时间段
-        if self.granularity_controller.granularity != 'monthly':
-            # 获取最新完整时间段的截止日期
-            last_complete_date = route_data[self.date_col].max()
-            route_data = route_data[route_data[self.date_col] < last_complete_date]
+        # 季度/年度：仅当原始月度数据未到该季度/年份末月时，删除最后一段
+        if self.granularity_controller.granularity == 'quarterly':
+            # print(original_last_date.month)
+            if pd.notna(original_last_date) and original_last_date.month not in {1, 4, 7, 10}:
+                last_period_start = route_data[self.date_col].max()
+                route_data = route_data[route_data[self.date_col] < last_period_start]
+        elif self.granularity_controller.granularity == 'yearly':
+            if pd.notna(original_last_date) and original_last_date.month != 12:
+                last_period_start = route_data[self.date_col].max()
+                route_data = route_data[route_data[self.date_col] < last_period_start]
         
         return route_data
     
