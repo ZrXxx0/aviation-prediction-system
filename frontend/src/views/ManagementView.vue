@@ -14,40 +14,42 @@
             <el-form-item label="选择航线" required>
               <el-row :gutter="12">
                 <el-col :span="12">
-                  <el-select
+                  <el-cascader
                     v-model="trainForm.originCity"
-                    filterable
+                    :options="locationOptions"
+                    :props="cascaderProps"
+                    clearable
                     placeholder="请选择起点城市"
                     style="width: 100%;"
-                  >
-                    <el-option
-                      v-for="city in cityOptions"
-                      :key="city"
-                      :label="city"
-                      :value="city"
-                    />
-                  </el-select>
+                  />
                 </el-col>
                 <el-col :span="12">
-                  <el-select
+                  <el-cascader
                     v-model="trainForm.destinationCity"
-                    filterable
+                    :options="filteredDestinationOptions"
+                    :props="cascaderProps"
+                    clearable
                     placeholder="请选择终点城市"
                     style="width: 100%;"
-                  >
-                    <el-option
-                      v-for="city in cityOptions"
-                      :key="city"
-                      :label="city"
-                      :value="city"
-                    />
-                  </el-select>
+                  />
                 </el-col>
               </el-row>
             </el-form-item>
 
-            <!-- 历史预测结果表格 -->
-            <el-form-item v-if="trainForm.originCity && trainForm.destinationCity" label="历史预测结果">
+            <!-- 新增：时间粒度选择 -->
+            <el-form-item label="时间粒度" required>
+              <el-select v-model="trainForm.timeGranularity" clearable placeholder="请选择时间粒度" style="width: 100%;">
+                <el-option label="年度" value="年度" />
+                <el-option label="季度" value="季度" />
+                <el-option label="月度" value="月度" />
+              </el-select>
+            </el-form-item>
+
+            <!-- 历史预测结果表格：仅当航线和时间粒度都选中时显示 -->
+            <el-form-item
+              v-if="showHistoryPrediction"
+              label="历史预测结果"
+            >
               <div class="history-prediction-table">
                 <el-table
                   :data="historyPredictions"
@@ -56,11 +58,11 @@
                   style="width: 100%;"
                   max-height="200"
                 >
-                  <el-table-column prop="date" label="日期" width="140" />
-                  <el-table-column prop="model" label="模型" width="160" />
-                  <el-table-column prop="mae" label="MAE" width="120" />
+                  <el-table-column prop="date" label="日期" width="160" />
+                  <el-table-column prop="model" label="模型" width="280" />
+                  <el-table-column prop="mae" label="MAE" width="140" />
                   <el-table-column prop="mape" label="MAPE (%)" width="140" />
-                  <el-table-column prop="rmse" label="RMSE" width="120" />
+                  <el-table-column prop="rmse" label="RMSE" width="140" />
                 </el-table>
               </div>
             </el-form-item>
@@ -358,93 +360,51 @@
 </template>
 
 <script setup>
-import { ref, reactive, watch } from 'vue'
+import { ref, reactive, watch, computed, onMounted } from 'vue'
 import api from '@/config/api.js'
+import * as XLSX from 'xlsx'
 
-// Tab
+// 1. 基础状态管理
 const activeTab = ref('model')
-
-// 数据上传相关
+const isTraining = ref(false)
 const fileList = ref([])
 const previewData = ref([])
 const previewColumns = ref([])
+const evaluationResults = ref([])
+const historyPredictions = ref([])
 
-function downloadTemplate() {
-  // 模板CSV示例，前端直接生成下载文件
-  const csvContent =
-    '航线起点,航线终点,时间,运力,运量,航班数\n北京,上海,2024-01,1000,900,30\n上海,广州,2024-01,1200,1100,28\n'
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = '数据模板.csv'
-  link.click()
-  URL.revokeObjectURL(link.href)
+// 2. 城市数据相关
+const cityMap = ref({})
+const locationOptions = ref([])
+const cascaderProps = {
+  expandTrigger: 'hover',
+  checkStrictly: false,
+  emitPath: true,
+  value: 'value',
+  label: 'label',
+  children: 'children',
 }
 
-function beforeUpload(file) {
-  const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv')
-  if (!isCSV) {
-    alert('只能上传CSV文件')
-    return false
-  }
-  const isLt5M = file.size / 1024 / 1024 < 5
-  if (!isLt5M) {
-    alert('文件大小不能超过5MB')
-    return false
-  }
-  return true
-}
+// 3. 训练状态管理
+const trainingStatus = reactive({
+  visible: false,
+  message: '',
+  progress: null,
+  status: 'success'
+})
 
-function handleFileChange(file, fileListNew) {
-  fileList.value = fileListNew
-
-  // 简单读取CSV前10行做预览
-  if (!file.raw) return
-
-  const reader = new FileReader()
-  reader.onload = e => {
-    const text = e.target.result
-    parseCSVPreview(text)
-  }
-  reader.readAsText(file.raw)
-}
-
-function parseCSVPreview(csvText) {
-  const lines = csvText.split(/\r?\n/)
-  const previewLines = lines.slice(0, 11) // 10行数据+header
-
-  if (previewLines.length < 2) {
-    previewData.value = []
-    previewColumns.value = []
-    return
-  }
-
-  const headers = previewLines[0].split(',')
-  previewColumns.value = headers
-
-  const rows = previewLines.slice(1).map(line => {
-    const vals = line.split(',')
-    const obj = {}
-    headers.forEach((h, idx) => {
-      obj[h] = vals[idx]
-    })
-    return obj
-  })
-  previewData.value = rows.filter(r => Object.values(r).some(v => v))
-}
-
-// 模型训练相关
-const cityOptions = [
-  '北京', '上海', '广州', '深圳', '成都', '杭州', 
-  '南京', '武汉', '西安', '重庆', '天津', '青岛',
-  '大连', '厦门', '昆明', '长沙', '郑州', '济南'
-]
-
+// 4. 表单数据管理
 const trainForm = reactive({
-  originCity: '',
-  destinationCity: '',
+  // 航线信息
+  originCity: [],
+  destinationCity: [],
+  timeGranularity: '',
+  
+  // 模型选择
   selectedModel: 'XGBoost',
   useSarima: false,
+  
+  // 模型超参数
   hyperParams: {
     xgboost: {
       learningRate: 0.1,
@@ -471,63 +431,231 @@ const trainForm = reactive({
   }
 })
 
-const isTraining = ref(false)
-const trainingStatus = reactive({
-  visible: false,
-  message: '',
-  progress: null,
-  status: 'success'
+// 5. 计算属性
+// 过滤终点城市选项
+const filteredDestinationOptions = computed(() => {
+  if (!trainForm.originCity?.length || trainForm.originCity.length !== 2) {
+    return locationOptions.value
+  }
+  
+  const [originProvince, originCity] = trainForm.originCity
+  return locationOptions.value
+    .map(province => {
+      const filteredChildren = province.children.filter(city => 
+        !(province.value === originProvince && city.value === originCity)
+      )
+      return filteredChildren.length ? { ...province, children: filteredChildren } : null
+    })
+    .filter(Boolean)
 })
 
-const evaluationResults = ref([])
+// 控制历史预测结果显示
+const showHistoryPrediction = computed(() => {
+  return trainForm.originCity?.length === 2 && 
+         trainForm.destinationCity?.length === 2 && 
+         !!trainForm.timeGranularity
+})
 
-// 历史预测结果数据
-const historyPredictions = ref([])
+// 6. 监听器
+// 监听起点城市变化
+watch(
+  () => trainForm.originCity,
+  (newVal) => {
+    if (!newVal?.length || newVal.length !== 2) {
+      trainForm.destinationCity = []
+      trainForm.timeGranularity = ''
+      historyPredictions.value = []
+    }
+  },
+  { immediate: true }
+)
 
-// 监听航线选择变化，加载历史预测结果
-watch([() => trainForm.originCity, () => trainForm.destinationCity], ([origin, destination]) => {
-  if (origin && destination) {
-    loadHistoryPredictions(origin, destination)
-  } else {
+// 监听终点城市变化
+watch(
+  () => trainForm.destinationCity,
+  (newVal) => {
+    if (!newVal?.length || newVal.length !== 2) {
+      trainForm.timeGranularity = ''
+      historyPredictions.value = []
+      return
+    }
+
+    // 检查是否与起点城市相同
+    if (
+      trainForm.originCity?.length === 2 &&
+      newVal.length === 2 &&
+      trainForm.originCity[0] === newVal[0] &&
+      trainForm.originCity[1] === newVal[1]
+    ) {
+      trainForm.destinationCity = []
+      alert('起点和终点城市不能相同！')
+    }
+  },
+  { immediate: true }
+)
+
+// 监听航线和时间粒度变化，加载历史预测结果
+watch(
+  [() => trainForm.originCity, () => trainForm.destinationCity, () => trainForm.timeGranularity],
+  ([originArr, destinationArr, granularity]) => {
+    if (!originArr?.length || !destinationArr?.length || !granularity) {
+      historyPredictions.value = []
+      return
+    }
+
+    const origin = originArr[1]
+    const destination = destinationArr[1]
+    
+    if (origin && destination && granularity) {
+      loadHistoryPredictions(origin, destination, granularity)
+    }
+  },
+  { immediate: true, deep: true }
+)
+
+// 7. 方法定义
+// 城市数据加载
+async function loadCityData() {
+  try {
+    const response = await fetch('/src/assets/城市经纬度.xlsx')
+    const arrayBuffer = await response.arrayBuffer()
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const data = XLSX.utils.sheet_to_json(sheet)
+
+    const cityMapTemp = {}
+    data.forEach((row) => {
+      const province = row['省份']
+      const city = row['城市']
+      if (!cityMapTemp[province]) cityMapTemp[province] = []
+      cityMapTemp[province].push(city)
+    })
+    
+    cityMap.value = cityMapTemp
+    locationOptions.value = Object.keys(cityMapTemp).map(province => ({
+      label: province,
+      value: province,
+      children: cityMapTemp[province].map(city => ({
+        label: city,
+        value: city
+      }))
+    }))
+  } catch (error) {
+    console.error('加载城市数据失败:', error)
+    alert('加载城市数据失败，请刷新页面重试')
+  }
+}
+
+// CSV相关功能
+function downloadTemplate() {
+  const csvContent =
+    '航线起点,航线终点,时间,运力,运量,航班数\n北京,上海,2024-01,1000,900,30\n上海,广州,2024-01,1200,1100,28\n'
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+  const link = document.createElement('a')
+  link.href = URL.createObjectURL(blob)
+  link.download = '数据模板.csv'
+  link.click()
+  URL.revokeObjectURL(link.href)
+}
+
+function beforeUpload(file) {
+  const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv')
+  const isLt5M = file.size / 1024 / 1024 < 5
+  
+  if (!isCSV) {
+    alert('只能上传CSV文件')
+    return false
+  }
+  if (!isLt5M) {
+    alert('文件大小不能超过5MB')
+    return false
+  }
+  
+  return true
+}
+
+function handleFileChange(file, fileListNew) {
+  fileList.value = fileListNew
+  if (!file.raw) return
+  
+  const reader = new FileReader()
+  reader.onload = e => {
+    parseCSVPreview(e.target.result)
+  }
+  reader.readAsText(file.raw)
+}
+
+function parseCSVPreview(csvText) {
+  const lines = csvText.split(/\r?\n/)
+  const previewLines = lines.slice(0, 11)
+  
+  if (previewLines.length < 2) {
+    previewData.value = []
+    previewColumns.value = []
+    return
+  }
+  
+  const headers = previewLines[0].split(',')
+  previewColumns.value = headers
+  
+  const rows = previewLines.slice(1).map(line => {
+    const vals = line.split(',')
+    const obj = {}
+    headers.forEach((h, idx) => {
+      obj[h] = vals[idx]
+    })
+    return obj
+  })
+  
+  previewData.value = rows.filter(r => Object.values(r).some(v => v))
+}
+
+// 获取历史预测结果
+async function loadHistoryPredictions(origin, destination, granularity) {
+  try {
+    historyPredictions.value = [
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} XGBoost`, 
+        mae: (Math.random() * 5 + 15).toFixed(2), 
+        mape: (Math.random() * 1 + 1.5).toFixed(2), 
+        rmse: (Math.random() * 5 + 20).toFixed(2) 
+      },
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} LightGBM`, 
+        mae: (Math.random() * 5 + 15).toFixed(2), 
+        mape: (Math.random() * 1 + 1.5).toFixed(2), 
+        rmse: (Math.random() * 5 + 20).toFixed(2)
+      },
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} XGBoost+SARIMA`, 
+        mae: (Math.random() * 5 + 10).toFixed(2), 
+        mape: (Math.random() * 0.8 + 1).toFixed(2), 
+        rmse: (Math.random() * 5 + 15).toFixed(2)
+      },
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} LightGBM+SARIMA`, 
+        mae: (Math.random() * 5 + 10).toFixed(2), 
+        mape: (Math.random() * 0.8 + 1).toFixed(2), 
+        rmse: (Math.random() * 5 + 15).toFixed(2)
+      }
+    ]
+  } catch (error) {
+    console.error('加载历史预测结果失败:', error)
     historyPredictions.value = []
   }
-})
-
-async function loadHistoryPredictions(origin, destination) {
-  try {
-    const url = api.getUrl(api.endpoints.PREDICT.FORECAST) + `?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&history=1`
-    const res = await fetch(url)
-    if (!res.ok) throw new Error('failed')
-    const data = await res.json()
-    const rows = (data?.results || data?.data || data || []).map((r) => ({
-      date: r.date || r.timestamp || r.time || '',
-      model: r.model || r.model_name || '',
-      mae: Number(r.mae ?? r.MAE ?? r.mae_value ?? 0).toFixed(2),
-      mape: Number(r.mape ?? r.MAPE ?? r.mape_value ?? 0).toFixed(2),
-      rmse: Number(r.rmse ?? r.RMSE ?? r.rmse_value ?? 0).toFixed(2),
-    }))
-    historyPredictions.value = rows
-  } catch (e) {
-    historyPredictions.value = [
-      { date: '2024-01-15', model: 'XGBoost', mae: '18.5', mape: '2.10', rmse: '25.3' },
-      { date: '2024-01-16', model: 'LightGBM', mae: '15.1', mape: '1.90', rmse: '22.7' },
-      { date: '2024-01-17', model: 'XGBoost+SARIMA', mae: '12.2', mape: '1.30', rmse: '19.8' },
-      { date: '2024-01-18', model: 'LightGBM+SARIMA', mae: '13.4', mape: '1.50', rmse: '20.6' },
-    ]
-  }
 }
 
-function getAccuracyClass(accuracy) {
-  if (accuracy >= 95) return 'accuracy-high'
-  if (accuracy >= 90) return 'accuracy-medium'
-  return 'accuracy-low'
-}
-
+// 开始训练模型
 async function startTraining() {
-  if (!trainForm.originCity || !trainForm.destinationCity) {
+  if (!trainForm.originCity?.length || !trainForm.destinationCity?.length) {
     alert('请选择起点和终点城市')
     return
   }
+
   isTraining.value = true
   trainingStatus.visible = true
   trainingStatus.message = '训练开始...'
@@ -535,52 +663,28 @@ async function startTraining() {
   trainingStatus.status = 'active'
   evaluationResults.value = []
 
-  // 模拟训练过程，5秒完成
   let progress = 0
   const interval = setInterval(() => {
-    progress += 10
+    progress = Math.min(progress + 10, 90)
     trainingStatus.progress = progress
   }, 500)
 
   try {
-    // 调用后端获取训练评估结果
     const payload = {
-      origin: trainForm.originCity,
-      destination: trainForm.destinationCity,
+      origin: trainForm.originCity[1],
+      destination: trainForm.destinationCity[1],
       model: trainForm.selectedModel,
       useSarima: trainForm.useSarima,
       params: trainForm.hyperParams,
     }
-    const res = await fetch(api.getUrl(api.endpoints.PREDICT.FORECAST), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-    const data = res.ok ? await res.json() : null
-    clearInterval(interval)
-    trainingStatus.message = '训练完成'
-    trainingStatus.status = 'success'
-    isTraining.value = false
-    const rows = (data?.results || data?.data || data || []).map((r) => ({
-      date: r.date || r.timestamp || new Date().toISOString().slice(0, 10),
-      model: r.model || r.model_name || (trainForm.useSarima ? `${trainForm.selectedModel}+SARIMA` : trainForm.selectedModel),
-      mae: Number(r.mae ?? r.MAE ?? r.mae_value ?? (Math.random() * 10 + 10)).toFixed(2),
-      mape: Number(r.mape ?? r.MAPE ?? r.mape_value ?? (Math.random() * 3 + 1)).toFixed(2),
-      rmse: Number(r.rmse ?? r.RMSE ?? r.rmse_value ?? (Math.random() * 15 + 15)).toFixed(2),
-    }))
-    evaluationResults.value = rows.length ? rows : [{
-      date: new Date().toISOString().slice(0, 10),
-      model: trainForm.useSarima ? `${trainForm.selectedModel}+SARIMA` : trainForm.selectedModel,
-      mae: (Math.random() * 10 + 10).toFixed(2),
-      mape: (Math.random() * 3 + 1).toFixed(2),
-      rmse: (Math.random() * 15 + 15).toFixed(2)
-    }]
-  } catch (e) {
-    clearInterval(interval)
-    trainingStatus.message = '训练完成（本地结果）'
-    trainingStatus.status = 'success'
-    isTraining.value = false
-    const modelName = trainForm.useSarima ? `${trainForm.selectedModel}+SARIMA` : trainForm.selectedModel
+
+    // 模拟训练过程
+    await new Promise(resolve => setTimeout(resolve, 3000))
+    
+    const modelName = trainForm.useSarima ? 
+      `${trainForm.selectedModel}+SARIMA` : 
+      trainForm.selectedModel
+
     evaluationResults.value = [{
       date: new Date().toISOString().slice(0, 10),
       model: modelName,
@@ -588,8 +692,24 @@ async function startTraining() {
       mape: (Math.random() * 3 + 1).toFixed(2),
       rmse: (Math.random() * 15 + 15).toFixed(2)
     }]
+
+    trainingStatus.message = '训练完成'
+    trainingStatus.progress = 100
+    trainingStatus.status = 'success'
+  } catch (error) {
+    console.error('训练失败:', error)
+    trainingStatus.message = '训练失败'
+    trainingStatus.status = 'exception'
+  } finally {
+    clearInterval(interval)
+    isTraining.value = false
   }
 }
+
+// 初始化
+onMounted(() => {
+  loadCityData()
+})
 </script>
 
 <style scoped>
