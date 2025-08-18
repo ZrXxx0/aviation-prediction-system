@@ -20,7 +20,7 @@ from . import views
 
 urlpatterns = [
     path('forecast/models/', views.get_forecast_models, name='get_forecast_models'),
-    path('forecast/run/', views.forecast_route_view, name='forecast_route_view'),
+    path('forecast/run/', views.forecast_route_view2, name='forecast_route_view2'),
     path('pretrain/model/', views.pretrain_model_request, name='pretrain_model_request'),
     path('formal/train/', views.formal_train_model, name='formal_train_model'),
     path('pretrain/models/', views.get_pretrain_models, name='get_pretrain_models'),
