@@ -24,17 +24,27 @@
         <!-- 选择起点 -->
         <div class="form-group">
           <label>选择起点</label>
-          <el-select v-model="selectedFrom" placeholder="请选择起点" class="large-select">
-            <el-option v-for="city in cities" :key="'from-'+city" :label="city" :value="city" />
-          </el-select>
+          <el-cascader
+            v-model="selectedFrom"
+            :options="locationOptions"
+            :props="cascaderProps"
+            placeholder="请选择起点城市"
+            class="large-select"
+            clearable
+          />
         </div>
 
         <!-- 选择终点 -->
         <div class="form-group">
           <label>选择终点</label>
-          <el-select v-model="selectedTo" placeholder="请选择终点" class="large-select">
-            <el-option v-for="city in cities" :key="'to-'+city" :label="city" :value="city" />
-          </el-select>
+          <el-cascader
+            v-model="selectedTo"
+            :options="locationOptions"
+            :props="cascaderProps"
+            placeholder="请选择终点城市"
+            class="large-select"
+            clearable
+          />
         </div>
 
         <!-- 选择模型 -->
@@ -115,11 +125,36 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
+import * as XLSX from 'xlsx'
+// import api from '@/api'   // 启用时导入 api.js
 
-const cities = ['北京', '上海', '广州', '深圳', '成都', '杭州']
+// 城市和省份数据结构
+const cityMap = ref({})
+
+// 省市级联选项
+const locationOptions = computed(() => [
+  ...Object.keys(cityMap.value).map(province => ({
+    label: province,
+    value: province,
+    children: (cityMap.value[province] || []).map(city => ({
+      label: city,
+      value: city
+    }))
+  }))
+])
+// 级联配置：必须选到叶子（城市）
+const cascaderProps = {
+  expandTrigger: 'hover',
+  checkStrictly: false,  // 禁止只选省份
+  emitPath: false,       // 只返回最后选的城市
+  value: 'value',
+  label: 'label',
+  children: 'children',
+}
+
 const selectedFrom = ref('')
 const selectedTo = ref('')
 const timeRange = ref('月度')
@@ -135,10 +170,29 @@ const performanceTable = ref([])
 const chartRef = ref(null)
 let chartInstance = null
 
+// 加载城市数据
+async function loadCityData() {
+  const response = await fetch('/src/assets/城市经纬度.xlsx')
+  const arrayBuffer = await response.arrayBuffer()
+  const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+  const sheet = workbook.Sheets[workbook.SheetNames[0]]
+  const data = XLSX.utils.sheet_to_json(sheet)
+
+  const cityMapTemp = {}
+  data.forEach((row) => {
+    const province = row['省份']
+    const city = row['城市']
+    if (!cityMapTemp[province]) cityMapTemp[province] = []
+    cityMapTemp[province].push(city)
+  })
+  cityMap.value = cityMapTemp
+}
+
+// 监听城市选择变化，获取模型列表
 watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, granularity, length]) => {
   if (!from || !to || !granularity || !length) {
     models.value = []
-    modelType.value = ''   // 清空选择的模型
+    modelType.value = ''
     return
   }
 
@@ -147,13 +201,15 @@ watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, gran
 
   loadingModels.value = true
   try {
-    // 真实请求
-    // const res = await axios.get(`/predict/forecast/models/`, {
+    // 真实请求（目前注释掉，前端直接使用静态数据）
+    // const url = api.getUrl(api.endpoints.PREDICT.FORECAST + 'models/')
+    // const res = await axios.get(url, {
     //   params: {
     //     origin_airport: from,
     //     destination_airport: to,
     //     time_granularity: mappedGranularity
-    //   }
+    //   },
+    //   timeout: api.getTimeout()
     // })
     // if (res.data.success) {
     //   models.value = res.data.data.models
@@ -161,9 +217,14 @@ watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, gran
 
     // ==== 模拟返回数据 ====
     models.value = [
-      {"model_id": "CAN_PEK_20250813233015", "train_mae": 33651.78, "train_rmse": 41485.83, "train_mape": 0.02, "train_r2": 1.0, "test_mae": 66841.01, "test_rmse": 67048.82, "test_mape": 0.05, "test_r2": -2.6, "train_start_time": "2011-01-01", "train_end_time": "2024-01-01", "composite_score": 0.3998}]
-    
-    modelType.value = ''   // 每次重新获取模型列表时清空选择
+      {
+        model_id: "CAN_PEK_20250813233015",
+        train_mae: 33651.78, train_rmse: 41485.83, train_mape: 0.02, train_r2: 1.0,
+        test_mae: 66841.01, test_rmse: 67048.82, test_mape: 0.05, test_r2: -2.6,
+        train_start_time: "2011-01-01", train_end_time: "2024-01-01", composite_score: 0.3998
+      }
+    ]
+    modelType.value = ''
   } catch (err) {
     console.error('获取模型失败:', err)
     models.value = []
@@ -190,11 +251,13 @@ function validateInputs() {
 function addTask() {
   if (!validateInputs()) return
   if (!isConfigured.value) isConfigured.value = true
-  const exists = tasks.value.some(r => r.from === selectedFrom.value && r.to === selectedTo.value)
+  const fromCity = selectedFrom.value
+  const toCity = selectedTo.value
+  const exists = tasks.value.some(r => r.from === fromCity && r.to === toCity)
   if (!exists) {
     tasks.value.push({
-      from: selectedFrom.value,
-      to: selectedTo.value,
+      from: fromCity,   // 确保只存城市
+      to: toCity,       // 确保只存城市
       modelType: modelType.value,
     })
   }
@@ -261,10 +324,10 @@ async function runForecast() {
   }
 
   try {
-    // 真实请求
-    // const res = await axios.post(`/predict/forecast/run`, { tasks: tasks.value })
-    // if (res.data.success) {
-    // }
+    // 真实请求（目前注释掉，前端直接使用静态数据）
+    // const url = api.getUrl(api.endpoints.PREDICT.FORECAST + 'run/')
+    // const res = await axios.post(url, { predictions: tasks.value }, { timeout: api.getTimeout() })
+    
     // ==== 静态模拟返回数据 ====
     const res = {
       success: true,
@@ -395,6 +458,7 @@ watch(showTrain, async () => {
 })
 
 onMounted(() => {
+  loadCityData()
   renderChart([], [], [])
   window.addEventListener('resize', () => chartInstance?.resize())
 })
