@@ -10,7 +10,8 @@ from statsmodels.tsa.statespace.sarimax import SARIMAX
 from statsmodels.tsa.holtwinters import Holt
 import warnings
 
-from .time_granularity import TimeGranularityController
+from predict.predictive_algorithm.time_granularity import TimeGranularityController
+
 
 
 class DataPreprocessor(BaseEstimator, TransformerMixin):
