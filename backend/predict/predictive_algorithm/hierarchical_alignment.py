@@ -17,7 +17,78 @@ def _format_quarter_label(ts: pd.Timestamp) -> str:
     if pd.isna(ts): return None
     return f"{ts.year}-Q{(ts.month - 1)//3 + 1}"
 
+def aggregate_quarterly_to_year_by_blocks(hist_q, fut_q):
+    """
+    规则：
+      1) 将季度历史(hist_q)与季度未来(fut_q)合并。
+      2) 仅保留季度齐全(4 季度)的年份，其他年份丢弃。
+      3) 排序后将最后 K 年划为“预测年”，其余为“历史年”，
+         其中 K = floor(未来季度总数 / 4)。
+    入参：
+      hist_q: [{'time_point':'YYYY-Qn','value':...}, ...]
+      fut_q : [{'time_point':'YYYY-Qn','value':...}, ...]
+    出参：
+      (yearly_hist, yearly_futu) 两个列表；元素形如 {'time_point':'YYYY','value':int}
+    假设：
+      - 未来季度位于时间序列的尾部（常见业务形态）。
+      - 同一季度不会在 hist_q 与 fut_q 重复出现；若出现，以 fut_q 为准可自行去重。
+    """
+    def _parse(lst):
+        if not lst:
+            return pd.DataFrame(columns=['year', 'q', 'value'])
+        df = pd.DataFrame(lst).copy()
+        m = df['time_point'].astype(str).str.extract(r'^(\d{4})-Q([1-4])$')
+        df['year'] = pd.to_numeric(m[0], errors='coerce')
+        df['q']    = pd.to_numeric(m[1], errors='coerce')
+        df['value'] = pd.to_numeric(df['value'], errors='coerce')
+        df = df.dropna(subset=['year','q'])
+        return df
 
+    H = _parse(hist_q)
+    F = _parse(fut_q)
+
+    # 合并（如同一季度重复，优先未来；也可以改成先删重后 concat）
+    if not H.empty and not F.empty:
+        # 去掉 H 中与 F 重叠的季度
+        keyF = set(zip(F['year'], F['q']))
+        H = H[~H.apply(lambda r: (r['year'], r['q']) in keyF, axis=1)]
+    ALL = pd.concat([H, F], ignore_index=True)
+
+    if ALL.empty:
+        return [], []
+
+    # 仅保留季度齐全(4个季度)的年份
+    # 用 unique 计数避免重复季度
+    agg = (ALL.groupby('year')
+             .agg(nq=('q', lambda s: len(pd.unique(s))),
+                  sumv=('value', 'sum'))
+             .reset_index())
+    full = agg[agg['nq'] == 4].copy()
+    if full.empty:
+        return [], []
+
+    # 计算 K = floor(未来季度总数/4) —— 只按可解析成功的未来季度计数
+    valid_future_quarters = 0 if F.empty else len(F)
+    K = valid_future_quarters // 4
+
+    # 排序并划分最后 K 年为“预测年”
+    full = full.sort_values('year')
+    years = full['year'].tolist()
+    if K > 0:
+        fut_years = set(years[-K:])
+    else:
+        fut_years = set()
+
+    yearly_hist = []
+    yearly_futu = []
+    for _, row in full.iterrows():
+        item = {'time_point': str(int(row['year'])), 'value': int(round(row['sumv']))}
+        if int(row['year']) in fut_years:
+            yearly_futu.append(item)
+        else:
+            yearly_hist.append(item)
+
+    return yearly_hist, yearly_futu
 
 # 线性对齐
 def linear_reconcile_monthly_to_quarterly(result_monthly, result_quarterly):
