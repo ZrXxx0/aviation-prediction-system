@@ -209,337 +209,267 @@ def get_forecast_models(request):
             'message': str(e)
         }, status=500)
 
-# 预测并返回结果函数
+# 预测并返回结果函数+层级对齐
 @csrf_exempt  # 仅用于测试，避免403错误
 @require_POST
 def forecast_route_view(request):
     """
-    批量预测航线座位数
-    
-    请求体格式：
-    {
-        "predictions": [
-            {
-                "origin_airport": "CAN",  # 起始机场三字码
-                "destination_airport": "PEK",  # 终点机场三字码
-                "time_granularity": "monthly",  # 预测时间粒度 (yearly/quarterly/monthly)
-                "prediction_periods": 12,  # 预测时间长度
-                "model_id": "model_id_123"  # 使用的预测模型ID
-            }
-        ]
-    }
-    
-    返回格式：
-    {
-        "success": true,
-        "data": [
-            {
-                "model_info": {
-                    "model_id": "model_id_123",
-                    "origin_airport": "CAN",
-                    "destination_airport": "PEK",
-                    "time_granularity": "monthly",
-                    "model_type": "LightGBM",
-                    "feature_count": 25,
-                    "training_samples": 120,
-                    "test_samples": 30,
-                    "train_mae": 45.2,
-                    "train_rmse": 67.8,
-                    "train_mape": 0.15,
-                    "train_r2": 0.89,
-                    "test_mae": 52.1,
-                    "test_rmse": 71.3,
-                    "test_mape": 0.18,
-                    "test_r2": 0.85,
-                    "train_start_time": "2023-01-01",
-                    "train_end_time": "2023-12-31",
-                    "last_complete_date": "2024-01-31"
-                },
-                "prediction_results": {
-                    "historical_data": [
-                        {"time_point": "2023-01", "value": 1200},
-                        {"time_point": "2023-02", "value": 1350}
-                    ],
-                    "future_predictions": [
-                        {"time_point": "2024-02", "value": 1400},
-                        {"time_point": "2024-03", "value": 1450}
-                    ]
-                }
-            }
-        ]
-    }
+       批量预测航线座位数
+
+       请求体格式：
+      {
+         "predictions": [
+           {
+             "hierarchy_reconcile": 1,
+             "origin_airport": "CAN",
+             "destination_airport": "PEK",
+             "time_granularity": "monthly",
+             "prediction_periods": 12,
+             "monthly_model_id": "CAN_PEK_20250813233020",
+             "quarterly_model_id": "CAN_PEK_20250813233015"
+           },
+           {
+             "hierarchy_reconcile": 0,
+             "origin_airport": "CAN",
+             "destination_airport": "PVG",
+             "time_granularity": "monthly",
+             "prediction_periods": 12,
+             "model_id": "CAN_PVG_20250813233021"
+           }
+         ]
+       }
+
+       返回格式：
+       {
+           "success": true,
+           "data": [
+               {
+                   "task_index": 0,
+                   "hierarchy_reconcile": 0,
+                   data{
+                       "model_info": {
+                           "model_id": "model_id_123",
+                           "origin_airport": "CAN",
+                           "destination_airport": "PEK",
+                           "time_granularity": "monthly",
+                           "model_type": "LightGBM",
+                           "feature_count": 25,
+                           "training_samples": 120,
+                           "test_samples": 30,
+                           "train_mae": 45.2,
+                           "train_rmse": 67.8,
+                           "train_mape": 0.15,
+                           "train_r2": 0.89,
+                           "test_mae": 52.1,
+                           "test_rmse": 71.3,
+                           "test_mape": 0.18,
+                           "test_r2": 0.85,
+                           "train_start_time": "2023-01-01",
+                           "train_end_time": "2023-12-31",
+                           "last_complete_date": "2024-01-31"
+                       },
+                       "prediction_results": {
+                           "historical_data": [
+                               {"time_point": "2023-01", "value": 1200},
+                               {"time_point": "2023-02", "value": 1350}
+                           ],
+                           "future_predictions": [
+                               {"time_point": "2024-02", "value": 1400},
+                               {"time_point": "2024-03", "value": 1450}
+                           ]
+                       }
+                   }
+               }
+           ]
+       }
     """
     try:
-        # 解析请求体
         data = json.loads(request.body)
-        predictions = data.get('predictions', [])
-        
-        if not predictions:
-            return JsonResponse({
-                'error': '缺少预测请求',
-                'message': '请提供 predictions 数组'
-            }, status=400)
-        
-        # 验证每个预测请求
-        for i, pred in enumerate(predictions):
-            required_fields = ['origin_airport', 'destination_airport', 'time_granularity', 'prediction_periods', 'model_id']
-            missing_fields = [field for field in required_fields if field not in pred]
-            
-            if missing_fields:
-                return JsonResponse({
-                    'error': f'预测请求 {i+1} 缺少必要字段',
-                    'message': f'缺少字段: {", ".join(missing_fields)}'
-                }, status=400)
-            
-            # 验证时间粒度
-            if pred['time_granularity'] not in ['yearly', 'quarterly', 'monthly']:
-                return JsonResponse({
-                    'error': f'预测请求 {i+1} 无效的时间粒度',
-                    'message': 'time_granularity 必须是 yearly, quarterly 或 monthly 之一'
-                }, status=400)
-            
-            # 验证预测期数
-            if not isinstance(pred['prediction_periods'], int) or pred['prediction_periods'] <= 0:
-                return JsonResponse({
-                    'error': f'预测请求 {i+1} 无效的预测期数',
-                    'message': 'prediction_periods 必须是正整数'
-                }, status=400)
-        
-        # 执行预测
-        results = []
-        for pred in predictions:
-            try:
-                result = predict_single_route(pred)
-                results.append(result)
-            except Exception as e:
-                # 如果单个预测失败，记录错误但继续处理其他预测
-                import traceback
-                error_details = {
-                    'error_message': str(e),
-                    'error_type': type(e).__name__,
-                    'traceback': traceback.format_exc(),
-                    'request': pred
-                }
-                results.append(error_details)
-        
-        return JsonResponse({
-            'success': True,
-            'data': results
-        })
-        
-    except json.JSONDecodeError:
-        return JsonResponse({
-            'error': '无效的JSON格式',
-            'message': '请求体必须是有效的JSON格式'
-        }, status=400)
-    except Exception as e:
-        import traceback
-        return JsonResponse({
-            'error': '服务器内部错误',
-            'message': str(e),
-            'error_type': type(e).__name__,
-            'traceback': traceback.format_exc()
-        }, status=500)
-
-
-# 预测并返回结果函数+层级对齐
-@csrf_exempt
-@require_POST
-def forecast_route_view2(request):
-    """
-        批量预测航线座位数（支持可选“层级对齐”）
-
-        请求体格式：
-        {
-            "hierarchy_reconcile": 1,                 // 0=不对齐(直接转调原接口)；1=进行层级对齐
-            "reconcile_algo": "linear",               // 可选："linear"(默认) 或 "mint"
-            "predictions": [
-                {
-                    "origin_airport": "CAN",          // 起始机场三字码
-                    "destination_airport": "PEK",     // 终点机场三字码
-                    "prediction_periods": 12,         // 预测未来期数（正整数）
-                    "monthly_model_id": "M_ID_123",   // 月度模型ID
-                    "quarterly_model_id": "Q_ID_456"  // 季度模型ID
-                }
-            ]
-        }
-
-        说明：
-        - 当 hierarchy_reconcile=0 时，直接调用原有 forecast_route_view(request)，返回与原接口完全一致。
-        - 当 hierarchy_reconcile=1 时：
-          1) 同时调用月度与季度模型；
-          2) 仅对“月度的未来段”做层级对齐（历史不变）；
-          3) 返回三份结果：                          # [修改] 这里改成“三份”
-             - data_monthly   ：月度结果（future 为对齐后的值，time_point 形如 "YYYY-MM"）
-             - data_quarterly ：季度结果（future 由“对齐后的月度未来”按季度聚合得到，time_point 形如 "YYYY-Qn"）
-             - data_yearly    ：年度结果（基于“季度数据”按年聚合得到，time_point 形如 "YYYY"）  # [新增]
-
-        返回格式（hierarchy_reconcile=1 时）：
-        {
-            "success": true,
-            "hierarchy_reconcile": 1,
-            "data_monthly":   [ {...} ],
-            "data_quarterly": [ {...} ],
-            "data_yearly":    [ {...} ]
-        }
-    """
-
-    try:
-        data = json.loads(request.body)
-        if int(data.get('hierarchy_reconcile', 0)) == 0:
-            return forecast_route_view(request)  # 直接沿用旧接口
-
-        algo = (data.get('reconcile_algo') or 'linear').lower()
-        recon_fn = linear_reconcile_monthly_to_quarterly if algo != 'mint' else mint_reconcile_monthly_to_quarterly
-
         predictions = data.get('predictions', [])
         if not predictions:
             return JsonResponse({'error': '缺少预测请求', 'message': '请提供 predictions 数组'}, status=400)
 
-        data_monthly, data_quarterly = [], []
-        data_yearly = []  # 年度结果列表
+        results = []
+        # 获得预测时间长度
+        target_granularity = predictions[0].get('time_granularity')
+        prediction_periods = predictions[0].get('prediction_periods')
+        if target_granularity == 'monthly':
+            months = prediction_periods
+        elif target_granularity == 'quarterly':
+            months = prediction_periods * 3
+        elif target_granularity == 'yearly':
+            months = prediction_periods * 12
+        else:
+            return JsonResponse({
+                'error': '不支持的时间粒度',
+                'message': 'time_granularity 必须为 monthly, quarterly 或 yearly'
+            }, status=400)
+
+        q_periods = max(1, math.ceil(months / 3))
 
         for i, pred in enumerate(predictions):
-            # 必填（对齐模式）
-            for f in ['origin_airport', 'destination_airport', 'prediction_periods', 'monthly_model_id', 'quarterly_model_id']:
-                if f not in pred:
-                    return JsonResponse({
-                        'error': f'预测请求 {i+1} 缺少必要字段',
-                        'message': f'缺少字段: {f}（hierarchy_reconcile=1 时必填）'
-                    }, status=400)
-            if not isinstance(pred['prediction_periods'], int) or pred['prediction_periods'] <= 0:
-                return JsonResponse({
-                    'error': f'预测请求 {i+1} 无效的预测期数',
-                    'message': 'prediction_periods 必须是正整数'
-                }, status=400)
-
-            months = int(pred['prediction_periods'])      # 期望覆盖的“月数”
-            q_periods = max(1, math.ceil(months / 3))     # 3个月=1季度，向上取整
-
-            base = {
-                'origin_airport': pred['origin_airport'],
-                'destination_airport': pred['destination_airport'],
-            }
-
-            monthly_req = {
-                **base,
-                'time_granularity': 'monthly',
-                'prediction_periods': months,             # 月度照传
-                'model_id': pred['monthly_model_id'],
-            }
-            quarterly_req = {
-                **base,
-                'time_granularity': 'quarterly',
-                'prediction_periods': q_periods,          # 季度用 ceil(months/3)
-                'model_id': pred['quarterly_model_id'],
-            }
-
             try:
-                # 1) 调两套模型
-                monthly_resp   = predict_single_route(monthly_req)
-                quarterly_resp = predict_single_route(quarterly_req)
+                hierarchy_reconcile = int(pred.get('hierarchy_reconcile', 0))
 
-                # 2) 整成DF：YearMonth, Predicted, Set（月度）；YearMonth, Predicted（季度）
-                pm = monthly_resp.get('prediction_results', {}) or {}
-                hist_m = pm.get('historical_data', []) or []
-                futu_m = pm.get('future_predictions', []) or []
-                df_m = pd.DataFrame(
-                    [{'YearMonth': h['time_point'], 'Predicted': h['value'], 'Set': 'History'} for h in hist_m] +
-                    [{'YearMonth': f['time_point'], 'Predicted': f['value'], 'Set': 'Future'}  for f in futu_m],
-                    columns=['YearMonth', 'Predicted', 'Set']
-                )
+                if hierarchy_reconcile == 0:
+                    # === 非对齐预测逻辑 ===
+                    required_fields = ['origin_airport', 'destination_airport', 'time_granularity', 'prediction_periods', 'model_id']
+                    missing_fields = [field for field in required_fields if field not in pred]
+                    if missing_fields:
+                        raise ValueError(f'缺少字段: {", ".join(missing_fields)}')
 
-                pq = quarterly_resp.get('prediction_results', {}) or {}
-                q_hist = pq.get('historical_data', []) or []
-                q_futu = pq.get('future_predictions', []) or []
-                q_all = q_hist + q_futu
-                df_q = pd.DataFrame(
-                    [{'YearMonth': r['time_point'], 'Predicted': r['value']} for r in q_all],
-                    columns=['YearMonth', 'Predicted']
-                )
+                    if pred['time_granularity'] not in ['yearly', 'quarterly', 'monthly']:
+                        raise ValueError('time_granularity 必须是 yearly, quarterly 或 monthly 之一')
 
-                # 3) 对齐（linear/mint）
-                df_m_rec = recon_fn(df_m, df_q)
+                    if not isinstance(pred['prediction_periods'], int) or pred['prediction_periods'] <= 0:
+                        raise ValueError('prediction_periods 必须是正整数')
 
-                # 4) 月度：历史不变；未来用 Predicted_Reconciled
-                df_m_rec['YearMonth'] = pd.to_datetime(df_m_rec['YearMonth'], errors='coerce', format='%Y-%m')
-                hist_out_m = [
-                    {'time_point': t.strftime('%Y-%m'), 'value': int(v) if pd.notna(v) else None}
-                    for t, v in zip(
-                        df_m_rec.loc[df_m_rec['Set'] == 'History', 'YearMonth'],
-                        df_m_rec.loc[df_m_rec['Set'] == 'History', 'Predicted']
-                    ) if pd.notna(t)
-                ]
-                futu_out_m = [
-                    {'time_point': t.strftime('%Y-%m'), 'value': int(round(v)) if pd.notna(v) else None}
-                    for t, v in zip(
-                        df_m_rec.loc[df_m_rec['Set'] == 'Future', 'YearMonth'],
-                        df_m_rec.loc[df_m_rec['Set'] == 'Future', 'Predicted_Reconciled']
-                    ) if pd.notna(t)
-                ]
+                    result = predict_single_route(pred)
 
-                # 5) 季度结果：直接使用季度模型输出（避免跨界季度只算未来月的问题）
-                # 原来这里是按 df_m_rec 的 Future 月份聚合得到 futu_out_q —— 删除那段
-                # 直接取季度模型的历史和未来：
-                hist_q = pq.get('historical_data', []) or []
-                futu_out_q = pq.get('future_predictions', []) or []
+                    results.append({
+                        'task_index': i,
+                        'hierarchy_reconcile': 0,
+                        'data': result
+                    })
 
-                # 6) 年度聚合（基于“季度数据”）
-                yearly_hist, yearly_futu = aggregate_quarterly_to_year_by_blocks(hist_q, futu_out_q)
+                else:
+                    # === 层级对齐逻辑 ===
+                    algo = (pred.get('reconcile_algo') or 'linear').lower()
+                    recon_fn = linear_reconcile_monthly_to_quarterly if algo != 'mint' else mint_reconcile_monthly_to_quarterly
+
+                    for f in ['origin_airport', 'destination_airport', 'prediction_periods', 'monthly_model_id', 'quarterly_model_id']:
+                        if f not in pred:
+                            raise ValueError(f'缺少字段: {f}（hierarchy_reconcile=1 时必填）')
+
+                    if not isinstance(pred['prediction_periods'], int) or pred['prediction_periods'] <= 0:
+                        raise ValueError('prediction_periods 必须是正整数')
 
 
-                # 7) 组装返回（三份）
-                monthly_item = copy.deepcopy(monthly_resp)
-                if 'model_info' not in monthly_item: monthly_item['model_info'] = {}
-                if 'prediction_results' not in monthly_item: monthly_item['prediction_results'] = {}
-                monthly_item['model_info']['time_granularity'] = 'monthly'
-                monthly_item['model_info']['model_id'] = pred['monthly_model_id']
-                monthly_item['prediction_results']['historical_data'] = hist_out_m
-                monthly_item['prediction_results']['future_predictions'] = futu_out_m
-
-                quarterly_item = copy.deepcopy(quarterly_resp)
-                if 'model_info' not in quarterly_item: quarterly_item['model_info'] = {}
-                if 'prediction_results' not in quarterly_item: quarterly_item['prediction_results'] = {}
-                quarterly_item['model_info']['time_granularity'] = 'quarterly'
-                quarterly_item['model_info']['model_id'] = pred['quarterly_model_id']
-                quarterly_item['prediction_results']['historical_data'] = hist_q
-                quarterly_item['prediction_results']['future_predictions'] = futu_out_q
-
-                yearly_item = {
-                    'model_info': {
-                        **(quarterly_item.get('model_info') or {}),
-                        'time_granularity': 'yearly',
-                        'model_id': pred['quarterly_model_id'],  # 来源于季度聚合
-                    },
-                    'prediction_results': {
-                        'historical_data': yearly_hist,
-                        'future_predictions': yearly_futu
+                    base = {
+                        'origin_airport': pred['origin_airport'],
+                        'destination_airport': pred['destination_airport'],
                     }
-                }
 
-                data_monthly.append(monthly_item)
-                data_quarterly.append(quarterly_item)
-                data_yearly.append(yearly_item)
+                    monthly_req = {
+                        **base,
+                        'time_granularity': 'monthly',
+                        'prediction_periods': months,
+                        'model_id': pred['monthly_model_id'],
+                    }
+                    quarterly_req = {
+                        **base,
+                        'time_granularity': 'quarterly',
+                        'prediction_periods': q_periods,
+                        'model_id': pred['quarterly_model_id'],
+                    }
+
+                    # 1. 执行两套模型预测
+                    monthly_resp = predict_single_route(monthly_req)
+                    quarterly_resp = predict_single_route(quarterly_req)
+
+                    # 2. 转为DataFrame
+                    pm = monthly_resp.get('prediction_results', {})
+                    hist_m = pm.get('historical_data', []) or []
+                    futu_m = pm.get('future_predictions', []) or []
+                    df_m = pd.DataFrame(
+                        [{'YearMonth': h['time_point'], 'Predicted': h['value'], 'Set': 'History'} for h in hist_m] +
+                        [{'YearMonth': f['time_point'], 'Predicted': f['value'], 'Set': 'Future'} for f in futu_m],
+                        columns=['YearMonth', 'Predicted', 'Set']
+                    )
+
+                    pq = quarterly_resp.get('prediction_results', {})
+                    q_hist = pq.get('historical_data', []) or []
+                    q_futu = pq.get('future_predictions', []) or []
+                    q_all = q_hist + q_futu
+                    df_q = pd.DataFrame(
+                        [{'YearMonth': r['time_point'], 'Predicted': r['value']} for r in q_all],
+                        columns=['YearMonth', 'Predicted']
+                    )
+
+                    # 3. 对齐
+                    df_m_rec = recon_fn(df_m, df_q)
+
+                    # 4. 拆分历史和未来（月度）
+                    df_m_rec['YearMonth'] = pd.to_datetime(df_m_rec['YearMonth'], errors='coerce', format='%Y-%m')
+                    hist_out_m = [
+                        {'time_point': t.strftime('%Y-%m'), 'value': int(v) if pd.notna(v) else None}
+                        for t, v in zip(
+                            df_m_rec.loc[df_m_rec['Set'] == 'History', 'YearMonth'],
+                            df_m_rec.loc[df_m_rec['Set'] == 'History', 'Predicted']
+                        ) if pd.notna(t)
+                    ]
+                    futu_out_m = [
+                        {'time_point': t.strftime('%Y-%m'), 'value': int(round(v)) if pd.notna(v) else None}
+                        for t, v in zip(
+                            df_m_rec.loc[df_m_rec['Set'] == 'Future', 'YearMonth'],
+                            df_m_rec.loc[df_m_rec['Set'] == 'Future', 'Predicted_Reconciled']
+                        ) if pd.notna(t)
+                    ]
+
+                    # 5. 年度聚合（基于季度）
+                    yearly_hist, yearly_futu = aggregate_quarterly_to_year_by_blocks(q_hist, q_futu)
+
+                    # 6. 构造结构 —— 只返回目标粒度
+                    if target_granularity == 'monthly':
+                        selected_item = {
+                            'model_info': {
+                                **(monthly_resp.get('model_info') or {}),
+                                'time_granularity': 'monthly',
+                                'model_id': pred['monthly_model_id']
+                            },
+                            'prediction_results': {
+                                'historical_data': hist_out_m,
+                                'future_predictions': futu_out_m
+                            }
+                        }
+
+                    elif target_granularity == 'quarterly':
+                        selected_item = {
+                            'model_info': {
+                                **(quarterly_resp.get('model_info') or {}),
+                                'time_granularity': 'quarterly',
+                                'model_id': pred['quarterly_model_id']
+                            },
+                            'prediction_results': {
+                                'historical_data': q_hist,
+                                'future_predictions': q_futu
+                            }
+                        }
+
+                    elif target_granularity == 'yearly':
+                        selected_item = {
+                            'model_info': {
+                                **(quarterly_resp.get('model_info') or {}),
+                                'time_granularity': 'yearly',
+                                'model_id': pred['quarterly_model_id']  # 因为年是从季聚合来的
+                            },
+                            'prediction_results': {
+                                'historical_data': yearly_hist,
+                                'future_predictions': yearly_futu
+                            }
+                        }
+
+                    # 添加到最终统一结果中
+                    results.append({
+                        'task_index': i,
+                        'hierarchy_reconcile': 1,
+                        'data': selected_item
+                    })
+
 
             except Exception as e:
                 import traceback
-                err = {
+                results.append({
+                    'task_index': i,
                     'error_message': str(e),
                     'error_type': type(e).__name__,
                     'traceback': traceback.format_exc(),
                     'request': pred
-                }
-                data_monthly.append(copy.deepcopy(err))
-                data_quarterly.append(copy.deepcopy(err))
-                data_yearly.append(copy.deepcopy(err))
-
+                })
 
         return JsonResponse({
             'success': True,
-            'hierarchy_reconcile': 1,
-            'data_monthly': data_monthly,
-            'data_quarterly': data_quarterly,
-            'data_yearly': data_yearly,
+            'data': results
         })
 
     except json.JSONDecodeError:
@@ -552,7 +482,6 @@ def forecast_route_view2(request):
             'error_type': type(e).__name__,
             'traceback': traceback.format_exc()
         }, status=500)
-
 
 
 # 模型训练请求处理
