@@ -36,7 +36,6 @@
               </el-row>
             </el-form-item>
 
-            <!-- 新增：时间粒度选择 -->
             <el-form-item label="时间粒度" required>
               <el-select v-model="trainForm.timeGranularity" clearable placeholder="请选择时间粒度" style="width: 100%;">
                 <el-option label="年度" value="年度" />
@@ -45,11 +44,7 @@
               </el-select>
             </el-form-item>
 
-            <!-- 历史预测结果表格：仅当航线和时间粒度都选中时显示 -->
-            <el-form-item
-              v-if="showHistoryPrediction"
-              label="历史预测结果"
-            >
+            <el-form-item v-if="showHistoryPrediction" label="历史训练结果">
               <div class="history-prediction-table">
                 <el-table
                   :data="historyPredictions"
@@ -59,7 +54,14 @@
                   max-height="200"
                 >
                   <el-table-column prop="date" label="日期" width="160" />
-                  <el-table-column prop="model" label="模型" width="280" />
+                  <el-table-column label="模型" width="280">
+                    <template #default="scope">
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>{{ scope.row.model }}</span>
+                        <el-link type="primary" @click="showModelDetail(scope.row)">详情</el-link>
+                      </div>
+                    </template>
+                  </el-table-column>
                   <el-table-column prop="mae" label="MAE" width="140" />
                   <el-table-column prop="mape" label="MAPE (%)" width="140" />
                   <el-table-column prop="rmse" label="RMSE" width="140" />
@@ -74,16 +76,18 @@
               </el-radio-group>
             </el-form-item>
 
-            <el-form-item label="组合模型">
-              <el-checkbox v-model="trainForm.useSarima">使用SARIMA作为组合模型</el-checkbox>
+            <el-form-item label="组合时序模型">
+              <el-radio-group v-model="trainForm.comboModel">
+                <el-radio label="">不使用</el-radio>
+                <el-radio label="sarima">SARIMA</el-radio>
+                <el-radio label="svr">SVR</el-radio>
+              </el-radio-group>
             </el-form-item>
 
             <el-form-item label="模型超参数">
               <el-row :gutter="100">
-                <!-- 左侧：主模型超参数 -->
-                <el-col :span="trainForm.useSarima ? 9 : 24">
-                  <el-divider content-position="left">{{ trainForm.selectedModel }} 参数</el-divider>
-                  <!-- XGBoost 模型超参数 -->
+                <el-col :span="trainForm.comboModel ? 9 : 24">
+                  <el-divider content-position="left" style="min-width:200px;">{{ trainForm.selectedModel }}参数</el-divider>
                   <div v-if="trainForm.selectedModel === 'XGBoost'" class="model-params-container">
                     <el-row :gutter="12">
                       <el-col :span="24">
@@ -150,7 +154,6 @@
                     </el-row>
                   </div>
 
-                  <!-- LightGBM 模型超参数 -->
                   <div v-if="trainForm.selectedModel === 'LightGBM'" class="model-params-container">
                     <el-row :gutter="12">
                       <el-col :span="24">
@@ -216,13 +219,11 @@
                       </el-col>
                     </el-row>
                   </div>
-
                 </el-col>
 
-                <!-- 右侧：SARIMA 组合模型超参数 -->
-                <el-col v-if="trainForm.useSarima" :span="12" :offset="3">
+                <el-col v-if="trainForm.comboModel === 'sarima'" :span="7" :offset="1">
                   <div class="model-params-container">
-                    <el-divider content-position="left">SARIMA 参数</el-divider>
+                    <el-divider content-position="left" style="min-width:200px;">SARIMA参数</el-divider>
                     <el-row :gutter="12">
                       <el-col :span="24">
                         <div class="param-label">差分阶数 (d)</div>
@@ -234,7 +235,7 @@
                         />
                       </el-col>
                       <el-col :span="24" style="margin-top: 12px;">
-                        <div class="param-label">自回归阶数 (p)</div>
+                        <div class="param-label">AR阶数 (p)</div>
                         <el-input-number
                           v-model="trainForm.hyperParams.sarima.p"
                           :min="0"
@@ -245,7 +246,7 @@
                     </el-row>
                     <el-row :gutter="12" style="margin-top: 12px;">
                       <el-col :span="24">
-                        <div class="param-label">移动平均阶数 (q)</div>
+                        <div class="param-label">MA阶数(q)</div>
                         <el-input-number
                           v-model="trainForm.hyperParams.sarima.q"
                           :min="0"
@@ -265,6 +266,37 @@
                     </el-row>
                   </div>
                 </el-col>
+
+                <el-col v-if="trainForm.comboModel === 'svr'" :span="7" :offset="1">
+                  <div class="model-params-container">
+                    <el-divider content-position="left" style="min-width:200px;">SVR参数</el-divider>
+                    <el-row :gutter="12">
+                      <el-col :span="24">
+                        <div class="param-label">核函数(kernel)</div>
+                        <el-select v-model="trainForm.hyperParams.svr.kernel" placeholder="选择核函数" style="width: 180px;">
+                          <el-option label="rbf" value="rbf" />
+                          <el-option label="linear" value="linear" />
+                          <el-option label="poly" value="poly" />
+                          <el-option label="sigmoid" value="sigmoid" />
+                        </el-select>
+                      </el-col>
+                      <el-col :span="24" style="margin-top: 12px;">
+                        <div class="param-label">C</div>
+                        <el-input-number v-model="trainForm.hyperParams.svr.C" :min="0.1" :max="100" :step="0.1" controls-position="right" />
+                      </el-col>
+                    </el-row>
+                    <el-row :gutter="12" style="margin-top: 12px;">
+                      <el-col :span="24">
+                        <div class="param-label">epsilon</div>
+                        <el-input-number v-model="trainForm.hyperParams.svr.epsilon" :min="0.001" :max="1" :step="0.001" controls-position="right" />
+                      </el-col>
+                      <el-col :span="24" style="margin-top: 12px;">
+                        <div class="param-label">gamma</div>
+                        <el-input-number v-model="trainForm.hyperParams.svr.gamma" :min="0.001" :max="1" :step="0.001" controls-position="right" />
+                      </el-col>
+                    </el-row>
+                  </div>
+                </el-col>
               </el-row>
             </el-form-item>
 
@@ -272,39 +304,13 @@
               <el-button
                 type="primary"
                 :loading="isTraining"
-                @click="startTraining"
+                @click="openTrainingDialog"
                 :disabled="isTraining || !trainForm.originCity || !trainForm.destinationCity"
               >
                 开始训练
               </el-button>
             </el-form-item>
           </el-form>
-
-          <el-card class="training-status" v-if="trainingStatus.visible">
-            <p><strong>训练状态：</strong> {{ trainingStatus.message }}</p>
-            <el-progress
-              :percentage="trainingStatus.progress"
-              v-if="trainingStatus.progress !== null"
-              :status="trainingStatus.status"
-            ></el-progress>
-          </el-card>
-
-          <div v-if="evaluationResults.length" class="eval-result">
-            <h4>训练评估结果</h4>
-            <el-table
-              :data="evaluationResults"
-              stripe
-              border
-              style="width: 100%;"
-              max-height="320"
-            >
-              <el-table-column prop="date" label="日期" width="140" />
-              <el-table-column prop="model" label="模型" width="160" />
-              <el-table-column prop="mae" label="MAE" width="120" />
-              <el-table-column prop="mape" label="MAPE (%)" width="140" />
-              <el-table-column prop="rmse" label="RMSE" width="120" />
-            </el-table>
-          </div>
         </div>
       </el-tab-pane>
 
@@ -356,15 +362,51 @@
         </div>
       </el-tab-pane>
     </el-tabs>
+
+    <!-- 训练评估结果弹窗 -->
+    <el-dialog v-model="showTrainingDialog" title="模型训练评估结果" width="700px" :close-on-click-modal="false">
+      <div v-if="trainingDialogLoading">模型训练中，请稍候...</div>
+      <div v-else>
+        <el-table :data="evaluationResults" style="margin: 24px 0;">
+          <el-table-column prop="date" label="日期" />
+          <el-table-column prop="model" label="模型" />
+          <el-table-column prop="mae" label="MAE" />
+          <el-table-column prop="mape" label="MAPE (%)" />
+          <el-table-column prop="rmse" label="RMSE" />
+        </el-table>
+        <div style="text-align:right;">
+          <el-button type="primary" @click="saveModel" :loading="savingModel" style="margin-top:16px;">保存模型</el-button>
+        </div>
+      </div>
+    </el-dialog>
+
+    <!-- 模型详情弹窗 -->
+    <el-dialog v-model="showDetailDialog" title="模型参数详情" width="500px" :close-on-click-modal="false">
+      <div v-if="detailModel">
+        <el-descriptions :title="detailModel.model" :column="1" border>
+          <el-descriptions-item label="日期">{{ detailModel.date }}</el-descriptions-item>
+          <el-descriptions-item label="MAE">{{ detailModel.mae }}</el-descriptions-item>
+          <el-descriptions-item label="MAPE">{{ detailModel.mape }}</el-descriptions-item>
+          <el-descriptions-item label="RMSE">{{ detailModel.rmse }}</el-descriptions-item>
+          <el-descriptions-item label="参数">
+            <div v-if="detailModel.params">
+              <div v-for="(val, key) in detailModel.params" :key="key">
+                <strong>{{ key }}:</strong> {{ val }}
+              </div>
+            </div>
+            <div v-else>无参数信息</div>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, watch, computed, onMounted } from 'vue'
-import api from '@/config/api.js'
 import * as XLSX from 'xlsx'
+import axios from 'axios'
 
-// 1. 基础状态管理
 const activeTab = ref('model')
 const isTraining = ref(false)
 const fileList = ref([])
@@ -373,7 +415,6 @@ const previewColumns = ref([])
 const evaluationResults = ref([])
 const historyPredictions = ref([])
 
-// 2. 城市数据相关
 const cityMap = ref({})
 const locationOptions = ref([])
 const cascaderProps = {
@@ -385,26 +426,12 @@ const cascaderProps = {
   children: 'children',
 }
 
-// 3. 训练状态管理
-const trainingStatus = reactive({
-  visible: false,
-  message: '',
-  progress: null,
-  status: 'success'
-})
-
-// 4. 表单数据管理
 const trainForm = reactive({
-  // 航线信息
   originCity: [],
   destinationCity: [],
   timeGranularity: '',
-  
-  // 模型选择
   selectedModel: 'XGBoost',
-  useSarima: false,
-  
-  // 模型超参数
+  comboModel: '', // '', 'sarima', 'svr'
   hyperParams: {
     xgboost: {
       learningRate: 0.1,
@@ -427,17 +454,45 @@ const trainForm = reactive({
       p: 1,
       q: 1,
       seasonal: 12
+    },
+    svr: {
+      kernel: 'rbf',
+      C: 1,
+      epsilon: 0.1,
+      gamma: 0.1
     }
   }
 })
 
-// 5. 计算属性
-// 过滤终点城市选项
+const showTrainingDialog = ref(false)
+const trainingDialogLoading = ref(false)
+const savingModel = ref(false)
+
+// 模型详情弹窗相关
+const showDetailDialog = ref(false)
+const detailModel = ref(null)
+
+function showModelDetail(row) {
+  let params = {}
+  if (row.model.includes('XGBoost')) {
+    params = { ...trainForm.hyperParams.xgboost }
+  } else if (row.model.includes('LightGBM')) {
+    params = { ...trainForm.hyperParams.lightgbm }
+  }
+  if (row.model.includes('SARIMA')) {
+    params = { ...params, ...trainForm.hyperParams.sarima }
+  }
+  if (row.model.includes('SVR')) {
+    params = { ...params, ...trainForm.hyperParams.svr }
+  }
+  detailModel.value = { ...row, params }
+  showDetailDialog.value = true
+}
+
 const filteredDestinationOptions = computed(() => {
   if (!trainForm.originCity?.length || trainForm.originCity.length !== 2) {
     return locationOptions.value
   }
-  
   const [originProvince, originCity] = trainForm.originCity
   return locationOptions.value
     .map(province => {
@@ -449,15 +504,12 @@ const filteredDestinationOptions = computed(() => {
     .filter(Boolean)
 })
 
-// 控制历史预测结果显示
 const showHistoryPrediction = computed(() => {
   return trainForm.originCity?.length === 2 && 
          trainForm.destinationCity?.length === 2 && 
          !!trainForm.timeGranularity
 })
 
-// 6. 监听器
-// 监听起点城市变化
 watch(
   () => trainForm.originCity,
   (newVal) => {
@@ -470,7 +522,6 @@ watch(
   { immediate: true }
 )
 
-// 监听终点城市变化
 watch(
   () => trainForm.destinationCity,
   (newVal) => {
@@ -479,8 +530,6 @@ watch(
       historyPredictions.value = []
       return
     }
-
-    // 检查是否与起点城市相同
     if (
       trainForm.originCity?.length === 2 &&
       newVal.length === 2 &&
@@ -494,7 +543,6 @@ watch(
   { immediate: true }
 )
 
-// 监听航线和时间粒度变化，加载历史预测结果
 watch(
   [() => trainForm.originCity, () => trainForm.destinationCity, () => trainForm.timeGranularity],
   ([originArr, destinationArr, granularity]) => {
@@ -502,10 +550,8 @@ watch(
       historyPredictions.value = []
       return
     }
-
     const origin = originArr[1]
     const destination = destinationArr[1]
-    
     if (origin && destination && granularity) {
       loadHistoryPredictions(origin, destination, granularity)
     }
@@ -513,8 +559,6 @@ watch(
   { immediate: true, deep: true }
 )
 
-// 7. 方法定义
-// 城市数据加载
 async function loadCityData() {
   try {
     const response = await fetch('/src/assets/城市经纬度.xlsx')
@@ -522,7 +566,6 @@ async function loadCityData() {
     const workbook = XLSX.read(arrayBuffer, { type: 'array' })
     const sheet = workbook.Sheets[workbook.SheetNames[0]]
     const data = XLSX.utils.sheet_to_json(sheet)
-
     const cityMapTemp = {}
     data.forEach((row) => {
       const province = row['省份']
@@ -530,7 +573,6 @@ async function loadCityData() {
       if (!cityMapTemp[province]) cityMapTemp[province] = []
       cityMapTemp[province].push(city)
     })
-    
     cityMap.value = cityMapTemp
     locationOptions.value = Object.keys(cityMapTemp).map(province => ({
       label: province,
@@ -546,7 +588,6 @@ async function loadCityData() {
   }
 }
 
-// CSV相关功能
 function downloadTemplate() {
   const csvContent =
     '航线起点,航线终点,时间,运力,运量,航班数\n北京,上海,2024-01,1000,900,30\n上海,广州,2024-01,1200,1100,28\n'
@@ -561,7 +602,6 @@ function downloadTemplate() {
 function beforeUpload(file) {
   const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv')
   const isLt5M = file.size / 1024 / 1024 < 5
-  
   if (!isCSV) {
     alert('只能上传CSV文件')
     return false
@@ -570,14 +610,12 @@ function beforeUpload(file) {
     alert('文件大小不能超过5MB')
     return false
   }
-  
   return true
 }
 
 function handleFileChange(file, fileListNew) {
   fileList.value = fileListNew
   if (!file.raw) return
-  
   const reader = new FileReader()
   reader.onload = e => {
     parseCSVPreview(e.target.result)
@@ -588,16 +626,13 @@ function handleFileChange(file, fileListNew) {
 function parseCSVPreview(csvText) {
   const lines = csvText.split(/\r?\n/)
   const previewLines = lines.slice(0, 11)
-  
   if (previewLines.length < 2) {
     previewData.value = []
     previewColumns.value = []
     return
   }
-  
   const headers = previewLines[0].split(',')
   previewColumns.value = headers
-  
   const rows = previewLines.slice(1).map(line => {
     const vals = line.split(',')
     const obj = {}
@@ -606,13 +641,24 @@ function parseCSVPreview(csvText) {
     })
     return obj
   })
-  
   previewData.value = rows.filter(r => Object.values(r).some(v => v))
 }
 
-// 获取历史预测结果
+// 获取历史预测结果（带GET请求示例，已注释）
 async function loadHistoryPredictions(origin, destination, granularity) {
   try {
+    // 示例：向后端请求历史预测结果
+    /*
+    const res = await axios.get('/api/history_predictions', {
+      params: {
+        origin,
+        destination,
+        granularity
+      }
+    })
+    historyPredictions.value = res.data.results
+    */
+    // 以下为模拟数据
     historyPredictions.value = [
       { 
         date: '2024-01', 
@@ -649,42 +695,31 @@ async function loadHistoryPredictions(origin, destination, granularity) {
   }
 }
 
-// 开始训练模型
-async function startTraining() {
-  if (!trainForm.originCity?.length || !trainForm.destinationCity?.length) {
+function openTrainingDialog() {
+  if (
+    !trainForm.originCity?.length ||
+    !trainForm.destinationCity?.length
+  ) {
     alert('请选择起点和终点城市')
     return
   }
+  if (!trainForm.timeGranularity) {
+    alert('请选择时间粒度')
+    return
+  }
+  showTrainingDialog.value = true
+  startTraining()
+}
 
+async function startTraining() {
   isTraining.value = true
-  trainingStatus.visible = true
-  trainingStatus.message = '训练开始...'
-  trainingStatus.progress = 0
-  trainingStatus.status = 'active'
+  trainingDialogLoading.value = true
   evaluationResults.value = []
-
-  let progress = 0
-  const interval = setInterval(() => {
-    progress = Math.min(progress + 10, 90)
-    trainingStatus.progress = progress
-  }, 500)
-
   try {
-    const payload = {
-      origin: trainForm.originCity[1],
-      destination: trainForm.destinationCity[1],
-      model: trainForm.selectedModel,
-      useSarima: trainForm.useSarima,
-      params: trainForm.hyperParams,
-    }
-
-    // 模拟训练过程
-    await new Promise(resolve => setTimeout(resolve, 3000))
-    
+    await new Promise(resolve => setTimeout(resolve, 2000))
     const modelName = trainForm.useSarima ? 
       `${trainForm.selectedModel}+SARIMA` : 
       trainForm.selectedModel
-
     evaluationResults.value = [{
       date: new Date().toISOString().slice(0, 10),
       model: modelName,
@@ -692,21 +727,40 @@ async function startTraining() {
       mape: (Math.random() * 3 + 1).toFixed(2),
       rmse: (Math.random() * 15 + 15).toFixed(2)
     }]
-
-    trainingStatus.message = '训练完成'
-    trainingStatus.progress = 100
-    trainingStatus.status = 'success'
   } catch (error) {
-    console.error('训练失败:', error)
-    trainingStatus.message = '训练失败'
-    trainingStatus.status = 'exception'
+    alert('训练失败')
   } finally {
-    clearInterval(interval)
     isTraining.value = false
+    trainingDialogLoading.value = false
   }
 }
 
-// 初始化
+async function saveModel() {
+  savingModel.value = true
+  try {
+    // 示例请求（请根据实际接口调整参数）
+    /*
+    const res = await axios.post('/api/save_model', {
+      evaluation: evaluationResults.value,
+      config: trainForm
+    })
+    if (res.data.success) {
+      showTrainingDialog.value = false
+    } else {
+      alert('保存失败')
+    }
+    */
+    // 模拟保存成功
+    setTimeout(() => {
+      showTrainingDialog.value = false
+      savingModel.value = false
+    }, 1000)
+  } catch (e) {
+    alert('保存失败')
+    savingModel.value = false
+  }
+}
+
 onMounted(() => {
   loadCityData()
 })

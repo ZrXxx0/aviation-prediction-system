@@ -23,7 +23,7 @@
 
         <!-- 选择起点 -->
         <div class="form-group">
-          <label>选择起点</label>
+          <label>航线起点</label>
           <el-cascader
             v-model="selectedFrom"
             :options="locationOptions"
@@ -36,7 +36,7 @@
 
         <!-- 选择终点 -->
         <div class="form-group">
-          <label>选择终点</label>
+          <label>航线终点</label>
           <el-cascader
             v-model="selectedTo"
             :options="locationOptions"
@@ -47,33 +47,9 @@
           />
         </div>
 
-        <!-- 选择模型 -->
-        <div class="form-group">
-          <label>选择模型</label>
-          <el-select v-model="modelType" placeholder="选择模型" class="large-select" :disabled="loadingModels || !models.length">
-            <el-option
-              v-for="m in models"
-              :key="m.model_id"
-              :label="m.model_id"
-              :value="m.model_id"
-            >
-              <template #default>
-                <el-tooltip
-                  effect="dark"
-                  placement="right"
-                  :content="`MAE: ${m.test_mae}, RMSE: ${m.test_rmse}, MAPE: ${m.test_mape}, R²: ${m.test_r2}`"
-                >
-                  <span>{{ m.model_id }}</span>
-                </el-tooltip>
-              </template>
-            </el-option>
-          </el-select>
-          <div v-if="loadingModels" style="margin-top:6px; font-size:12px; color:#999;">加载模型中...</div>
-        </div>
-
         <!-- 按钮行 -->
         <div class="button-row">
-          <el-button type="primary" class="run-btn" @click="addTask">添加预测任务</el-button>
+          <el-button type="primary" class="run-btn" @click="openModelDialog">选择预测模型</el-button>
           <el-button type="success" class="run-btn" @click="runForecast">运行预测</el-button>
         </div>
 
@@ -85,7 +61,16 @@
               <span><strong>{{ task.from }} → {{ task.to }}</strong></span>
             </div>
             <div class="task-config">
-              <span>模型：{{ task.modelType }}</span>
+              <div class="task-info">
+                <template v-if="task.hierarchical">
+                  <div>层级校正</div>
+                  <div>月度模型：{{ task.monthlyModel }}</div>
+                  <div>季度模型：{{ task.quarterlyModel }}</div>
+                </template>
+                <template v-else>
+                  <div>模型：{{ task.modelType }}</div>
+                </template>
+              </div>
               <el-button size="mini" type="danger" @click="removeTask(index)">删除</el-button>
             </div>
           </div>
@@ -121,6 +106,82 @@
         </div>
       </div>
     </div>
+
+    <!-- 选择模型弹窗 -->
+    <el-dialog v-model="showModelDialog" title="选择预测模型" width="400px">
+      <el-checkbox v-model="hierarchicalMode" style="margin-bottom:16px;">
+        层级预测校正（需分别选择月度和季度模型）
+      </el-checkbox>
+      <div v-if="hierarchicalMode">
+        <div style="margin-bottom:12px;">
+          <label style="font-weight:600;">月度模型</label>
+          <el-select v-model="tempMonthlyModel" placeholder="选择月度模型" style="width:100%;" :disabled="loadingModels || !monthlyModels.length">
+            <el-option
+              v-for="m in monthlyModels"
+              :key="m.model_id"
+              :label="m.model_id"
+              :value="m.model_id"
+            >
+              <template #default>
+                <el-tooltip
+                  effect="dark"
+                  placement="right"
+                  :content="`MAE: ${m.test_mae}, RMSE: ${m.test_rmse}, MAPE: ${m.test_mape}, R²: ${m.test_r2}`"
+                >
+                  <span>{{ m.model_id }}</span>
+                </el-tooltip>
+              </template>
+            </el-option>
+          </el-select>
+        </div>
+        <div>
+          <label style="font-weight:600;">季度模型</label>
+          <el-select v-model="tempQuarterlyModel" placeholder="选择季度模型" style="width:100%;" :disabled="loadingModels || !quarterlyModels.length">
+            <el-option
+              v-for="m in quarterlyModels"
+              :key="m.model_id"
+              :label="m.model_id"
+              :value="m.model_id"
+            >
+              <template #default>
+                <el-tooltip
+                  effect="dark"
+                  placement="right"
+                  :content="`MAE: ${m.test_mae}, RMSE: ${m.test_rmse}, MAPE: ${m.test_mape}, R²: ${m.test_r2}`"
+                >
+                  <span>{{ m.model_id }}</span>
+                </el-tooltip>
+              </template>
+            </el-option>
+          </el-select>
+        </div>
+      </div>
+      <div v-else>
+        <el-select v-model="tempModelType" placeholder="选择模型" style="width:100%;" :disabled="loadingModels || !models.length">
+          <el-option
+            v-for="m in models"
+            :key="m.model_id"
+            :label="m.model_id"
+            :value="m.model_id"
+          >
+            <template #default>
+              <el-tooltip
+                effect="dark"
+                placement="right"
+                :content="`MAE: ${m.test_mae}, RMSE: ${m.test_rmse}, MAPE: ${m.test_mape}, R²: ${m.test_r2}`"
+              >
+                <span>{{ m.model_id }}</span>
+              </el-tooltip>
+            </template>
+          </el-option>
+        </el-select>
+      </div>
+      <div v-if="loadingModels" style="margin-top:6px; font-size:12px; color:#999;">加载模型中...</div>
+      <template #footer>
+        <el-button @click="showModelDialog = false">取消</el-button>
+        <el-button type="primary" @click="confirmModel">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -129,7 +190,6 @@ import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
 import * as XLSX from 'xlsx'
-// import api from '@/api'   // 启用时导入 api.js
 
 // 城市和省份数据结构
 const cityMap = ref({})
@@ -145,11 +205,10 @@ const locationOptions = computed(() => [
     }))
   }))
 ])
-// 级联配置：必须选到叶子（城市）
 const cascaderProps = {
   expandTrigger: 'hover',
-  checkStrictly: false,  // 禁止只选省份
-  emitPath: false,       // 只返回最后选的城市
+  checkStrictly: false,
+  emitPath: false,
   value: 'value',
   label: 'label',
   children: 'children',
@@ -166,6 +225,14 @@ const showTrain = ref(true)
 const isConfigured = ref(false)
 const tasks = ref([])
 const performanceTable = ref([])
+
+const showModelDialog = ref(false)
+const tempModelType = ref('')
+const hierarchicalMode = ref(false)
+const tempMonthlyModel = ref('')
+const tempQuarterlyModel = ref('')
+const monthlyModels = ref([])
+const quarterlyModels = ref([])
 
 const chartRef = ref(null)
 let chartInstance = null
@@ -188,6 +255,35 @@ async function loadCityData() {
   cityMap.value = cityMapTemp
 }
 
+// 获取模型列表（粒度可选）
+async function fetchModels(granularity) {
+  // granularity: 'monthly' | 'quarterly'
+  // 真实请求可用如下代码
+  // const url = api.getUrl(api.endpoints.PREDICT.FORECAST + 'models/')
+  // const res = await axios.get(url, {
+  //   params: {
+  //     origin_airport: selectedFrom.value,
+  //     destination_airport: selectedTo.value,
+  //     time_granularity: granularity
+  //   },
+  //   timeout: api.getTimeout()
+  // })
+  // if (res.data.success) return res.data.data.models
+
+  // ==== 模拟返回数据 ====
+  if (granularity === 'monthly') {
+    return [
+      { model_id: "CAN_PEK_monthly_01", test_mae: 10000, test_rmse: 12000, test_mape: 0.03, test_r2: 0.98 },
+      { model_id: "CAN_PEK_monthly_02", test_mae: 11000, test_rmse: 13000, test_mape: 0.04, test_r2: 0.97 }
+    ]
+  } else {
+    return [
+      { model_id: "CAN_PEK_quarterly_01", test_mae: 9000, test_rmse: 11000, test_mape: 0.02, test_r2: 0.99 },
+      { model_id: "CAN_PEK_quarterly_02", test_mae: 9500, test_rmse: 11500, test_mape: 0.025, test_r2: 0.985 }
+    ]
+  }
+}
+
 // 监听城市选择变化，获取模型列表
 watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, granularity, length]) => {
   if (!from || !to || !granularity || !length) {
@@ -200,66 +296,109 @@ watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, gran
   const mappedGranularity = granularityMap[granularity] || 'monthly'
 
   loadingModels.value = true
-  try {
-    // 真实请求（目前注释掉，前端直接使用静态数据）
-    // const url = api.getUrl(api.endpoints.PREDICT.FORECAST + 'models/')
-    // const res = await axios.get(url, {
-    //   params: {
-    //     origin_airport: from,
-    //     destination_airport: to,
-    //     time_granularity: mappedGranularity
-    //   },
-    //   timeout: api.getTimeout()
-    // })
-    // if (res.data.success) {
-    //   models.value = res.data.data.models
-    // }
+  models.value = await fetchModels(mappedGranularity)
+  loadingModels.value = false
+})
 
-    // ==== 模拟返回数据 ====
-    models.value = [
-      {
-        model_id: "CAN_PEK_20250813233015",
-        train_mae: 33651.78, train_rmse: 41485.83, train_mape: 0.02, train_r2: 1.0,
-        test_mae: 66841.01, test_rmse: 67048.82, test_mape: 0.05, test_r2: -2.6,
-        train_start_time: "2011-01-01", train_end_time: "2024-01-01", composite_score: 0.3998
-      }
-    ]
-    modelType.value = ''
-  } catch (err) {
-    console.error('获取模型失败:', err)
-    models.value = []
-    modelType.value = ''
-  } finally {
+// 层级模式切换时加载月度和季度模型
+watch(hierarchicalMode, async (val) => {
+  if (val) {
+    loadingModels.value = true
+    monthlyModels.value = await fetchModels('monthly')
+    quarterlyModels.value = await fetchModels('quarterly')
     loadingModels.value = false
   }
 })
 
-// 检查输入
-function validateInputs() {
-  if (!selectedFrom.value || !selectedTo.value || !timeRange.value || !numFeatures.value || !modelType.value) {
-    alert('请完整配置起点、终点、时间粒度、时间长度和模型')
-    return false
+// 校验输入并弹窗
+async function openModelDialog() {
+  if (!selectedFrom.value || !selectedTo.value || !timeRange.value || !numFeatures.value) {
+    alert('请完整配置起点、终点、时间粒度和时间长度')
+    return
   }
   if (selectedFrom.value === selectedTo.value) {
     alert('起点和终点不能相同')
-    return false
+    return
   }
-  return true
+  tempModelType.value = ''
+  tempMonthlyModel.value = ''
+  tempQuarterlyModel.value = ''
+  hierarchicalMode.value = false
+  showModelDialog.value = true
+  loadingModels.value = true
+  models.value = await fetchModels(
+    { '年度': 'yearly', '季度': 'quarterly', '月度': 'monthly' }[timeRange.value] || 'monthly'
+  )
+  loadingModels.value = false
 }
 
-// 添加任务
-function addTask() {
-  if (!validateInputs()) return
+// 确认选择模型并添加任务
+function confirmModel() {
+  if (hierarchicalMode.value) {
+    if (!tempMonthlyModel.value || !tempQuarterlyModel.value) {
+      alert('请分别选择月度和季度模型')
+      return
+    }
+    modelType.value = ''
+    addTask(true)
+  } else {
+    if (!tempModelType.value) {
+      alert('请选择模型')
+      return
+    }
+    modelType.value = tempModelType.value
+    addTask(false)
+  }
+  showModelDialog.value = false
+}
+
+function addTask(isHierarchical) {
+  if (!selectedFrom.value || !selectedTo.value || !timeRange.value || !numFeatures.value || (!modelType.value && !isHierarchical)) {
+    alert('请完整配置所有参数和模型')
+    return
+  }
+  if (selectedFrom.value === selectedTo.value) {
+    alert('起点和终点不能相同')
+    return
+  }
   if (!isConfigured.value) isConfigured.value = true
   const fromCity = selectedFrom.value
   const toCity = selectedTo.value
-  const exists = tasks.value.some(r => r.from === fromCity && r.to === toCity)
+  // 判断是否完全重复
+  let exists;
+  if (isHierarchical) {
+    exists = tasks.value.some(r =>
+      r.from === fromCity &&
+      r.to === toCity &&
+      r.hierarchical &&
+      r.monthlyModel === tempMonthlyModel.value &&
+      r.quarterlyModel === tempQuarterlyModel.value
+    )
+  } else {
+    exists = tasks.value.some(r =>
+      r.from === fromCity &&
+      r.to === toCity &&
+      !r.hierarchical &&
+      r.modelType === modelType.value
+    )
+  }
   if (!exists) {
-    tasks.value.push({
-      from: fromCity,   // 确保只存城市
-      to: toCity,       // 确保只存城市
-      modelType: modelType.value,
-    })
+    if (isHierarchical) {
+      tasks.value.push({
+        from: fromCity,
+        to: toCity,
+        hierarchical: true,
+        monthlyModel: tempMonthlyModel.value,
+        quarterlyModel: tempQuarterlyModel.value,
+      })
+    } else {
+      tasks.value.push({
+        from: fromCity,
+        to: toCity,
+        modelType: modelType.value,
+        hierarchical: false,
+      })
+    }
   }
 }
 
@@ -297,7 +436,7 @@ function renderChart(timeLabels = [], seriesData = []) {
         const time = params[0].axisValue
         let tooltipText = time + '<br/>'
         params.forEach(p => {
-          if (p.data != null) { // 只显示有值的点
+          if (p.data != null) {
             tooltipText += `<span style="display:inline-block;width:10px;height:10px;background-color:${p.color};margin-right:5px;border-radius:50%"></span> ${p.seriesName}: ${p.data}<br/>`
           }
         })
@@ -474,13 +613,11 @@ onBeforeUnmount(() => {
   padding: 1rem 2rem;
   width: 100%;
 }
-
 .forecast-content {
   display: flex;
   gap: 2rem;
   margin-top: 1rem;
 }
-
 .control-panel {
   flex: 0 0 320px;
   background: #ffffff;
@@ -488,7 +625,6 @@ onBeforeUnmount(() => {
   padding: 1rem 1.25rem;
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
-
 .panel-title {
   margin-top: 0;
   margin-bottom: 0.6rem;
@@ -496,45 +632,37 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: #2c3e50;
 }
-
 .form-group {
   margin-bottom: 1rem;
 }
-
 .form-group label {
   display: block;
   margin-bottom: 0.4rem;
   color: #34495e;
   font-weight: 600;
 }
-
 .button-row {
   display: flex;
   justify-content: space-between;
   gap: 4%;
   margin-top: 0.6rem;
 }
-
 .run-btn {
   width: 48%;
   display: inline-flex;
   justify-content: center;
   align-items: center;
 }
-
 .task-list {
   margin-top: 0.8rem;
 }
-
 .task-item {
   margin-bottom: 1rem;
 }
-
 .task-route {
   font-size: 1rem;
   font-weight: bold;
 }
-
 .task-config {
   font-size: 0.9rem;
   color: #7f8c8d;
@@ -542,14 +670,22 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
 }
-
+.task-info {
+  display: flex;
+  flex-direction: column;
+}
 .result-area {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
-
+.large-select {
+  width: 100%;
+  min-width: 220px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
 .chart-header {
   padding-bottom: 0.6rem;
   display: flex;
@@ -560,14 +696,12 @@ onBeforeUnmount(() => {
   padding-left: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
-
 .chart-area {
   height: 420px;
   background: #f8f9fa;
   border-radius: 0 0 8px 8px;
   padding: 8px;
 }
-
 .stat-card {
   background: #ffffff;
   border-radius: 8px;
@@ -576,20 +710,17 @@ onBeforeUnmount(() => {
   max-width: 100%;
   overflow-x: auto;  
 }
-
 .stat-card h3 {
   margin: 0 0 8px 0;
   color: #7f8c8d;
   font-size: 1rem;
 }
-
 .empty-wrap {
   padding: 24px;
   display: flex;
   justify-content: center;
   align-items: center;
 }
-
 @media (max-width: 900px) {
   .forecast-content {
     flex-direction: column;
