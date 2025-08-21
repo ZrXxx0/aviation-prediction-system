@@ -1,112 +1,312 @@
 <template>
-  <div class="forecast-container">
-    <div class="forecast-content">
-      <!-- 左侧控制面板 -->
-      <div class="control-panel">
-        <h2 class="panel-title">预测任务配置</h2>
+  <div class="model-container">
+    <el-tabs v-model="activeTab" type="card" stretch>
+      <el-tab-pane label="数据预测" name="forecast">
+        <div class="forecast-container">
+          <div class="forecast-content">
+            <!-- 左侧控制面板 -->
+            <div class="control-panel">
+              <h2 class="panel-title">预测任务配置</h2>
 
-        <!-- 时间粒度 -->
-        <div class="form-group" :disabled="isConfigured">
-          <label>预测时间粒度</label>
-          <el-select v-model="timeRange" placeholder="选择时间粒度" class="large-select" :disabled="isConfigured">
-            <el-option label="年度" value="年度" />
-            <el-option label="季度" value="季度" />
-            <el-option label="月度" value="月度" />
-          </el-select>
-        </div>
-
-        <!-- 预测时间长度 -->
-        <div class="form-group small-input" :disabled="isConfigured">
-          <label>预测时间长度</label>
-          <el-input-number v-model="numFeatures" :min="1" :controls="false" class="small-number" :disabled="isConfigured" />
-        </div>
-
-        <!-- 选择起点 -->
-        <div class="form-group">
-          <label>航线起点</label>
-          <el-cascader
-            v-model="selectedFrom"
-            :options="locationOptions"
-            :props="cascaderProps"
-            placeholder="请选择起点城市"
-            class="large-select"
-            clearable
-          />
-        </div>
-
-        <!-- 选择终点 -->
-        <div class="form-group">
-          <label>航线终点</label>
-          <el-cascader
-            v-model="selectedTo"
-            :options="locationOptions"
-            :props="cascaderProps"
-            placeholder="请选择终点城市"
-            class="large-select"
-            clearable
-          />
-        </div>
-
-        <!-- 按钮行 -->
-        <div class="button-row">
-          <el-button type="primary" class="run-btn" @click="openModelDialog">选择预测模型</el-button>
-          <el-button type="success" class="run-btn" @click="runForecast">运行预测</el-button>
-        </div>
-
-        <!-- 已选任务列表 -->
-        <div class="task-list" v-if="tasks.length">
-          <h3>已选预测任务</h3>
-          <div v-for="(task, index) in tasks" :key="index" class="task-item">
-            <div class="task-route">
-              <span><strong>{{ task.from }} → {{ task.to }}</strong></span>
-            </div>
-            <div class="task-config">
-              <div class="task-info">
-                <template v-if="task.hierarchical">
-                  <div>层级校正</div>
-                  <div>月度模型：{{ task.monthlyModel }}</div>
-                  <div>季度模型：{{ task.quarterlyModel }}</div>
-                </template>
-                <template v-else>
-                  <div>模型：{{ task.modelType }}</div>
-                </template>
+              <!-- 时间粒度 -->
+              <div class="form-group" :disabled="isConfigured">
+                <label>预测时间粒度</label>
+                <el-select v-model="timeRange" placeholder="选择时间粒度" class="large-select" :disabled="isConfigured">
+                  <el-option label="年度" value="年度" />
+                  <el-option label="季度" value="季度" />
+                  <el-option label="月度" value="月度" />
+                </el-select>
               </div>
-              <el-button size="mini" type="danger" @click="removeTask(index)">删除</el-button>
+
+              <!-- 预测时间长度 -->
+              <div class="form-group small-input" :disabled="isConfigured">
+                <label>预测时间长度</label>
+                <el-input-number v-model="numFeatures" :min="1" :controls="false" class="small-number" :disabled="isConfigured" />
+              </div>
+
+              <!-- 选择起点 -->
+              <div class="form-group">
+                <label>航线起点</label>
+                <el-cascader
+                  v-model="selectedFrom"
+                  :options="locationOptions"
+                  :props="cascaderProps"
+                  placeholder="请选择起点城市"
+                  class="large-select"
+                  clearable
+                />
+              </div>
+
+              <!-- 选择终点 -->
+              <div class="form-group">
+                <label>航线终点</label>
+                <el-cascader
+                  v-model="selectedTo"
+                  :options="filteredDestinationOptions"
+                  :props="cascaderProps"
+                  placeholder="请选择终点城市"
+                  class="large-select"
+                  clearable
+                />
+              </div>
+
+              <!-- 按钮行 -->
+              <div class="button-row">
+                <el-button type="primary" class="run-btn" @click="openModelDialog">选择预测模型</el-button>
+                <el-button type="success" class="run-btn" @click="runForecast">运行预测</el-button>
+              </div>
+
+              <!-- 已选任务列表 -->
+              <div class="task-list" v-if="tasks.length">
+                <h3>已选预测任务</h3>
+                <div v-for="(task, index) in tasks" :key="index" class="task-item">
+                  <div class="task-route">
+                    <span><strong>{{ task.from }} → {{ task.to }}</strong></span>
+                  </div>
+                  <div class="task-config">
+                    <div class="task-info">
+                      <template v-if="task.hierarchical">
+                        <div>层级校正</div>
+                        <div>月度模型：{{ task.monthlyModel }}</div>
+                        <div>季度模型：{{ task.quarterlyModel }}</div>
+                      </template>
+                      <template v-else>
+                        <div>模型：{{ task.modelType }}</div>
+                      </template>
+                    </div>
+                    <el-button size="mini" type="danger" @click="removeTask(index)">删除</el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 右侧图表和结果 -->
+            <div class="result-area">
+              <div class="chart-header">
+                <el-checkbox v-model="showTrain">显示历史数据</el-checkbox>
+              </div>
+              <div class="chart-area" ref="chartRef"></div>
+
+              <div class="stat-card">
+                <h3>预测性能指标</h3>
+                <el-table
+                  v-if="performanceTable.length"
+                  :data="performanceTable"
+                  stripe
+                  style="max-width:100%; overflow-x:auto; display:block;"
+                  :header-cell-style="{background:'#f5f7fa'}"
+                >
+                  <el-table-column prop="route" label="航线" min-width="180" />
+                  <el-table-column prop="model" label="模型" min-width="150" />
+                  <el-table-column prop="mae" label="MAE" min-width="100" />
+                  <el-table-column prop="rmse" label="RMSE" min-width="100" />
+                  <el-table-column prop="mape" label="MAPE (%)" min-width="100" />
+                  <el-table-column prop="r2" label="R²" min-width="100" />
+                </el-table>
+                <div v-else class="empty-wrap">
+                  <el-empty description="暂无预测结果" />
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-
-      <!-- 右侧图表和结果 -->
-      <div class="result-area">
-        <div class="chart-header">
-          <el-checkbox v-model="showTrain">显示历史数据</el-checkbox>
-        </div>
-        <div class="chart-area" ref="chartRef"></div>
-
-        <div class="stat-card">
-          <h3>预测性能指标</h3>
-          <el-table
-            v-if="performanceTable.length"
-            :data="performanceTable"
-            stripe
-            style="max-width:100%; overflow-x:auto; display:block;"
-            :header-cell-style="{background:'#f5f7fa'}"
+      </el-tab-pane>
+      <el-tab-pane label="模型训练" name="model">
+        <div class="model-train-panel">
+          <el-form
+            :model="trainForm"
+            ref="trainFormRef"
+            label-width="120px"
+            label-position="left"
+            class="train-form"
           >
-            <el-table-column prop="route" label="航线" min-width="180" />
-            <el-table-column prop="model" label="模型" min-width="150" />
-            <el-table-column prop="mae" label="MAE" min-width="100" />
-            <el-table-column prop="rmse" label="RMSE" min-width="100" />
-            <el-table-column prop="mape" label="MAPE (%)" min-width="100" />
-            <el-table-column prop="r2" label="R²" min-width="100" />
-          </el-table>
-          <div v-else class="empty-wrap">
-            <el-empty description="暂无预测结果" />
-          </div>
-        </div>
-      </div>
-    </div>
+            <el-form-item label="选择航线" required>
+              <el-row :gutter="12">
+                <el-col :span="12">
+                  <el-cascader
+                    v-model="trainForm.originCity"
+                    :options="locationOptions"
+                    :props="cascaderProps"
+                    clearable
+                    placeholder="请选择起点城市"
+                    style="width: 100%;"
+                  />
+                </el-col>
+                <el-col :span="12">
+                  <el-cascader
+                    v-model="trainForm.destinationCity"
+                    :options="filteredDestinationOptions"
+                    :props="cascaderProps"
+                    clearable
+                    placeholder="请选择终点城市"
+                    style="width: 100%;"
+                  />
+                </el-col>
+              </el-row>
+            </el-form-item>
 
+            <el-form-item label="时间粒度" required>
+              <el-select v-model="trainForm.timeGranularity" clearable placeholder="请选择时间粒度" style="width: 100%;">
+                <el-option label="年度" value="年度" />
+                <el-option label="季度" value="季度" />
+                <el-option label="月度" value="月度" />
+              </el-select>
+            </el-form-item>
+
+            <el-form-item v-if="showHistoryPrediction" label="历史训练结果">
+              <div class="history-prediction-table">
+                <el-table
+                  :data="historyPredictions"
+                  stripe
+                  border
+                  style="width: 100%;"
+                  max-height="200"
+                >
+                  <el-table-column prop="date" label="日期" width="160" />
+                  <el-table-column label="模型" width="280">
+                    <template #default="scope">
+                      <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>{{ scope.row.model }}</span>
+                        <el-link type="primary" @click="showModelDetail(scope.row)">详情</el-link>
+                      </div>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="mae" label="MAE" width="140" />
+                  <el-table-column prop="mape" label="MAPE (%)" width="140" />
+                  <el-table-column prop="rmse" label="RMSE" width="140" />
+                </el-table>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="选择模型" required>
+              <el-radio-group v-model="trainForm.selectedModel">
+                <el-radio-button label="XGBoost" />
+                <el-radio-button label="LightGBM" />
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item label="组合时序模型">
+              <el-radio-group v-model="trainForm.comboModel">
+                <el-radio label="">不使用</el-radio>
+                <el-radio label="sarima">SARIMA</el-radio>
+                <el-radio label="svr">SVR</el-radio>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item label="模型超参数">
+              <el-divider content-position="left" style="margin:16px 0 8px 0;">{{ trainForm.selectedModel }} 参数</el-divider>
+              <el-row :gutter="20" align="middle" style="margin-bottom:24px;">
+                <!-- XGBoost 参数 -->
+                <template v-if="trainForm.selectedModel === 'XGBoost'">
+                  <el-col :span="4" v-for="(item, idx) in [
+                    {label:'学习率', model:'learningRate', min:0.01, max:1, step:0.01},
+                    {label:'最大深度', model:'maxDepth', min:1, max:20},
+                    {label:'子采样比例', model:'subsample', min:0.1, max:1, step:0.1},
+                    {label:'特征采样比例', model:'colsampleBytree', min:0.1, max:1, step:0.1},
+                    {label:'正则化参数', model:'regAlpha', min:0, step:0.1},
+                    {label:'L2正则化', model:'regLambda', min:0, step:0.1}
+                  ]" :key="idx">
+                    <div class="param-label">{{ item.label }}</div>
+                    <el-input-number
+                      v-model="trainForm.hyperParams.xgboost[item.model]"
+                      :min="item.min"
+                      :max="item.max"
+                      :step="item.step || 1"
+                      controls-position="right"
+                      style="width:100%"
+                    />
+                  </el-col>
+                </template>
+
+                <!-- LightGBM 参数 -->
+                <template v-if="trainForm.selectedModel === 'LightGBM'">
+                  <el-col :span="4" v-for="(item, idx) in [
+                    {label:'学习率', model:'learningRate', min:0.01, max:1, step:0.01},
+                    {label:'叶子数量', model:'numLeaves', min:10, max:500},
+                    {label:'特征采样比例', model:'featureFraction', min:0.1, max:1, step:0.1},
+                    {label:'数据采样比例', model:'baggingFraction', min:0.1, max:1, step:0.1},
+                    {label:'最小数据量', model:'minDataInLeaf', min:1, max:100},
+                    {label:'L1正则化', model:'lambdaL1', min:0, step:0.1}
+                  ]" :key="idx">
+                    <div class="param-label">{{ item.label }}</div>
+                    <el-input-number
+                      v-model="trainForm.hyperParams.lightgbm[item.model]"
+                      :min="item.min"
+                      :max="item.max"
+                      :step="item.step || 1"
+                      controls-position="right"
+                      style="width:100%"
+                    />
+                  </el-col>
+                </template>
+
+                <!-- SARIMA 参数 -->
+                <template v-if="trainForm.comboModel === 'sarima'">
+                  <el-divider content-position="left" style="margin:16px 0 8px 0;">SARIMA 参数</el-divider>
+                  <el-col :span="4">
+                    <div class="param-label">d</div>
+                    <el-input-number v-model="trainForm.hyperParams.sarima.d" :min="0" :max="3" controls-position="right" style="width:100%"/>
+                  </el-col>
+                  <el-col :span="4">
+                    <div class="param-label">p</div>
+                    <el-input-number v-model="trainForm.hyperParams.sarima.p" :min="0" :max="10" controls-position="right" style="width:100%"/>
+                  </el-col>
+                  <el-col :span="4">
+                    <div class="param-label">q</div>
+                    <el-input-number v-model="trainForm.hyperParams.sarima.q" :min="0" :max="10" controls-position="right" style="width:100%"/>
+                  </el-col>
+                  <el-col :span="4">
+                    <div class="param-label">季节性周期</div>
+                    <el-input-number v-model="trainForm.hyperParams.sarima.seasonal" :min="1" :max="52" controls-position="right" style="width:100%"/>
+                  </el-col>
+                  <el-col :span="4"></el-col>
+                  <el-col :span="4"></el-col>
+                </template>
+
+                <!-- SVR 参数 -->
+                <template v-if="trainForm.comboModel === 'svr'">
+                  <el-divider content-position="left" style="margin:16px 0 8px 0;">SVR 参数</el-divider>
+                  <el-col :span="4">
+                    <div class="param-label">核函数</div>
+                    <el-select v-model="trainForm.hyperParams.svr.kernel" placeholder="选择核函数" style="width:100%;">
+                      <el-option label="rbf" value="rbf"/>
+                      <el-option label="linear" value="linear"/>
+                      <el-option label="poly" value="poly"/>
+                      <el-option label="sigmoid" value="sigmoid"/>
+                    </el-select>
+                  </el-col>
+                  <el-col :span="4">
+                    <div class="param-label">C</div>
+                    <el-input-number v-model="trainForm.hyperParams.svr.C" :min="0.1" :max="100" :step="0.1" controls-position="right" style="width:100%"/>
+                  </el-col>
+                  <el-col :span="4">
+                    <div class="param-label">epsilon</div>
+                    <el-input-number v-model="trainForm.hyperParams.svr.epsilon" :min="0.001" :max="1" :step="0.001" controls-position="right" style="width:100%"/>
+                  </el-col>
+                  <el-col :span="4">
+                    <div class="param-label">gamma</div>
+                    <el-input-number v-model="trainForm.hyperParams.svr.gamma" :min="0.001" :max="1" :step="0.001" controls-position="right" style="width:100%"/>
+                  </el-col>
+                  <el-col :span="4"></el-col>
+                  <el-col :span="4"></el-col>
+                </template>
+              </el-row>
+            </el-form-item>
+
+            <el-form-item>
+              <el-button
+                type="primary"
+                :loading="isTraining"
+                @click="openTrainingDialog"
+                :disabled="isTraining || !trainForm.originCity || !trainForm.destinationCity"
+              >
+                开始训练
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
     <!-- 选择模型弹窗 -->
     <el-dialog v-model="showModelDialog" title="选择预测模型" width="400px">
       <el-checkbox v-model="hierarchicalMode" style="margin-bottom:16px;">
@@ -182,11 +382,46 @@
         <el-button type="primary" @click="confirmModel">确定</el-button>
       </template>
     </el-dialog>
+    <!-- 训练评估结果弹窗 -->
+    <el-dialog v-model="showTrainingDialog" title="模型训练评估结果" width="700px" :close-on-click-modal="false">
+      <div v-if="trainingDialogLoading">模型训练中，请稍候...</div>
+      <div v-else>
+        <el-table :data="evaluationResults" style="margin: 24px 0;">
+          <el-table-column prop="date" label="日期" />
+          <el-table-column prop="model" label="模型" />
+          <el-table-column prop="mae" label="MAE" />
+          <el-table-column prop="mape" label="MAPE (%)" />
+          <el-table-column prop="rmse" label="RMSE" />
+        </el-table>
+        <div style="text-align:right;">
+          <el-button type="primary" @click="saveModel" :loading="savingModel" style="margin-top:16px;">保存模型</el-button>
+        </div>
+      </div>
+    </el-dialog>
+    <!-- 模型详情弹窗 -->
+    <el-dialog v-model="showDetailDialog" title="模型参数详情" width="500px" :close-on-click-modal="false">
+      <div v-if="detailModel">
+        <el-descriptions :title="detailModel.model" :column="1" border>
+          <el-descriptions-item label="日期">{{ detailModel.date }}</el-descriptions-item>
+          <el-descriptions-item label="MAE">{{ detailModel.mae }}</el-descriptions-item>
+          <el-descriptions-item label="MAPE">{{ detailModel.mape }}</el-descriptions-item>
+          <el-descriptions-item label="RMSE">{{ detailModel.rmse }}</el-descriptions-item>
+          <el-descriptions-item label="参数">
+            <div v-if="detailModel.params">
+              <div v-for="(val, key) in detailModel.params" :key="key">
+                <strong>{{ key }}:</strong> {{ val }}
+              </div>
+            </div>
+            <div v-else>无参数信息</div>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
 import * as XLSX from 'xlsx'
@@ -214,6 +449,51 @@ const cascaderProps = {
   children: 'children',
 }
 
+// 加载城市数据
+async function loadCityData() {
+  try {
+    const response = await fetch('/src/assets/城市经纬度.xlsx')
+    const arrayBuffer = await response.arrayBuffer()
+    const workbook = XLSX.read(arrayBuffer, { type: 'array' })
+    const sheet = workbook.Sheets[workbook.SheetNames[0]]
+    const data = XLSX.utils.sheet_to_json(sheet)
+    const cityMapTemp = {}
+    data.forEach((row) => {
+      const province = row['省份']
+      const city = row['城市']
+      if (!cityMapTemp[province]) cityMapTemp[province] = []
+      cityMapTemp[province].push(city)
+    })
+    cityMap.value = cityMapTemp
+    locationOptions.value = Object.keys(cityMapTemp).map(province => ({
+      label: province,
+      value: province,
+      children: cityMapTemp[province].map(city => ({
+        label: city,
+        value: city
+      }))
+    }))
+  } catch (error) {
+    console.error('加载城市数据失败:', error)
+    alert('加载城市数据失败，请刷新页面重试')
+  }
+}
+
+const filteredDestinationOptions = computed(() => {
+  if (!trainForm.originCity?.length || trainForm.originCity.length !== 2) {
+    return locationOptions.value
+  }
+  const [originProvince, originCity] = trainForm.originCity
+  return locationOptions.value
+    .map(province => {
+      const filteredChildren = province.children.filter(city => 
+        !(province.value === originProvince && city.value === originCity)
+      )
+      return filteredChildren.length ? { ...province, children: filteredChildren } : null
+    })
+    .filter(Boolean)
+})
+
 const selectedFrom = ref('')
 const selectedTo = ref('')
 const timeRange = ref('月度')
@@ -236,24 +516,6 @@ const quarterlyModels = ref([])
 
 const chartRef = ref(null)
 let chartInstance = null
-
-// 加载城市数据
-async function loadCityData() {
-  const response = await fetch('/src/assets/城市经纬度.xlsx')
-  const arrayBuffer = await response.arrayBuffer()
-  const workbook = XLSX.read(arrayBuffer, { type: 'array' })
-  const sheet = workbook.Sheets[workbook.SheetNames[0]]
-  const data = XLSX.utils.sheet_to_json(sheet)
-
-  const cityMapTemp = {}
-  data.forEach((row) => {
-    const province = row['省份']
-    const city = row['城市']
-    if (!cityMapTemp[province]) cityMapTemp[province] = []
-    cityMapTemp[province].push(city)
-  })
-  cityMap.value = cityMapTemp
-}
 
 // 获取模型列表（粒度可选）
 async function fetchModels(granularity) {
@@ -596,6 +858,222 @@ watch(showTrain, async () => {
   }
 })
 
+// 新增模型训练tab相关变量和方法（与ManagementView一致）
+const activeTab = ref('forecast')
+const isTraining = ref(false)
+const evaluationResults = ref([])
+const historyPredictions = ref([])
+
+const trainForm = reactive({
+  originCity: [],
+  destinationCity: [],
+  timeGranularity: '',
+  selectedModel: 'XGBoost',
+  comboModel: '', // '', 'sarima', 'svr'
+  hyperParams: {
+    xgboost: {
+      learningRate: 0.1,
+      maxDepth: 6,
+      subsample: 0.8,
+      colsampleBytree: 0.8,
+      regAlpha: 0,
+      regLambda: 1
+    },
+    lightgbm: {
+      learningRate: 0.1,
+      numLeaves: 31,
+      featureFraction: 0.8,
+      baggingFraction: 0.8,
+      minDataInLeaf: 20,
+      lambdaL1: 0
+    },
+    sarima: {
+      d: 1,
+      p: 1,
+      q: 1,
+      seasonal: 12
+    },
+    svr: {
+      kernel: 'rbf',
+      C: 1,
+      epsilon: 0.1,
+      gamma: 0.1
+    }
+  }
+})
+
+const showTrainingDialog = ref(false)
+const trainingDialogLoading = ref(false)
+const savingModel = ref(false)
+const showDetailDialog = ref(false)
+const detailModel = ref(null)
+
+function showModelDetail(row) {
+  let params = {}
+  if (row.model.includes('XGBoost')) {
+    params = { ...trainForm.hyperParams.xgboost }
+  } else if (row.model.includes('LightGBM')) {
+    params = { ...trainForm.hyperParams.lightgbm }
+  }
+  if (row.model.includes('SARIMA')) {
+    params = { ...params, ...trainForm.hyperParams.sarima }
+  }
+  if (row.model.includes('SVR')) {
+    params = { ...params, ...trainForm.hyperParams.svr }
+  }
+  detailModel.value = { ...row, params }
+  showDetailDialog.value = true
+}
+
+const showHistoryPrediction = computed(() => {
+  return trainForm.originCity?.length === 2 && 
+         trainForm.destinationCity?.length === 2 && 
+         !!trainForm.timeGranularity
+})
+
+watch(
+  () => trainForm.originCity,
+  (newVal) => {
+    if (!newVal?.length || newVal.length !== 2) {
+      trainForm.destinationCity = []
+      trainForm.timeGranularity = ''
+      historyPredictions.value = []
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  () => trainForm.destinationCity,
+  (newVal) => {
+    if (!newVal?.length || newVal.length !== 2) {
+      trainForm.timeGranularity = ''
+      historyPredictions.value = []
+      return
+    }
+    if (
+      trainForm.originCity?.length === 2 &&
+      newVal.length === 2 &&
+      trainForm.originCity[0] === newVal[0] &&
+      trainForm.originCity[1] === newVal[1]
+    ) {
+      trainForm.destinationCity = []
+      alert('起点和终点城市不能相同！')
+    }
+  },
+  { immediate: true }
+)
+
+watch(
+  [() => trainForm.originCity, () => trainForm.destinationCity, () => trainForm.timeGranularity],
+  ([originArr, destinationArr, granularity]) => {
+    if (!originArr?.length || !destinationArr?.length || !granularity) {
+      historyPredictions.value = []
+      return
+    }
+    const origin = originArr
+    const destination = destinationArr
+    if (origin && destination && granularity) {
+      loadHistoryPredictions(origin, destination, granularity)
+    }
+  },
+  { immediate: true, deep: true }
+)
+
+async function loadHistoryPredictions(origin, destination, granularity) {
+  try {
+    historyPredictions.value = [
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} XGBoost`, 
+        mae: (Math.random() * 5 + 15).toFixed(2), 
+        mape: (Math.random() * 1 + 1.5).toFixed(2), 
+        rmse: (Math.random() * 5 + 20).toFixed(2) 
+      },
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} LightGBM`, 
+        mae: (Math.random() * 5 + 15).toFixed(2), 
+        mape: (Math.random() * 1 + 1.5).toFixed(2), 
+        rmse: (Math.random() * 5 + 20).toFixed(2)
+      },
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} XGBoost+SARIMA`, 
+        mae: (Math.random() * 5 + 10).toFixed(2), 
+        mape: (Math.random() * 0.8 + 1).toFixed(2), 
+        rmse: (Math.random() * 5 + 15).toFixed(2)
+      },
+      { 
+        date: '2024-01', 
+        model: `${origin}-${destination} LightGBM+SARIMA`, 
+        mae: (Math.random() * 5 + 10).toFixed(2), 
+        mape: (Math.random() * 0.8 + 1).toFixed(2), 
+        rmse: (Math.random() * 5 + 15).toFixed(2)
+      }
+    ]
+  } catch (error) {
+    console.error('加载历史预测结果失败:', error)
+    historyPredictions.value = []
+  }
+}
+
+function openTrainingDialog() {
+  if (
+    !trainForm.originCity?.length ||
+    !trainForm.destinationCity?.length
+  ) {
+    alert('请选择起点和终点城市')
+    return
+  }
+  if (!trainForm.timeGranularity) {
+    alert('请选择时间粒度')
+    return
+  }
+  showTrainingDialog.value = true
+  startTraining()
+}
+
+async function startTraining() {
+  isTraining.value = true
+  trainingDialogLoading.value = true
+  evaluationResults.value = []
+  try {
+    await new Promise(resolve => setTimeout(resolve, 2000))
+    let modelName = trainForm.selectedModel
+    if (trainForm.comboModel === 'sarima') {
+      modelName += '+SARIMA'
+    } else if (trainForm.comboModel === 'svr') {
+      modelName += '+SVR'
+    }
+    evaluationResults.value = [{
+      date: new Date().toISOString().slice(0, 10),
+      model: modelName,
+      mae: (Math.random() * 10 + 10).toFixed(2),
+      mape: (Math.random() * 3 + 1).toFixed(2),
+      rmse: (Math.random() * 15 + 15).toFixed(2)
+    }]
+  } catch (error) {
+    alert('训练失败')
+  } finally {
+    isTraining.value = false
+    trainingDialogLoading.value = false
+  }
+}
+
+async function saveModel() {
+  savingModel.value = true
+  try {
+    setTimeout(() => {
+      showTrainingDialog.value = false
+      savingModel.value = false
+    }, 1000)
+  } catch (e) {
+    alert('保存失败')
+    savingModel.value = false
+  }
+}
+
 onMounted(() => {
   loadCityData()
   renderChart([], [], [])
@@ -609,29 +1087,40 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+/* ===== 容器基础布局 ===== */
+.model-container {
+  padding: 1rem 2rem;
+  max-width: 1600px;
+  margin: 0 auto;
+}
+
 .forecast-container {
   padding: 1rem 2rem;
   width: 100%;
 }
+
 .forecast-content {
   display: flex;
   gap: 2rem;
-  margin-top: 1rem;
+  /* margin-top: 1rem; */
 }
+
+/* ===== 左侧控制面板 ===== */
 .control-panel {
   flex: 0 0 320px;
-  background: #ffffff;
+  background: #fff;
   border-radius: 8px;
   padding: 1rem 1.25rem;
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
 }
+
 .panel-title {
-  margin-top: 0;
-  margin-bottom: 0.6rem;
+  margin: 0 0 0.6rem 0;
   font-size: 1.15rem;
   font-weight: 600;
   color: #2c3e50;
 }
+
 .form-group {
   margin-bottom: 1rem;
 }
@@ -641,6 +1130,13 @@ onBeforeUnmount(() => {
   color: #34495e;
   font-weight: 600;
 }
+
+.large-select {
+  width: 100%;
+  min-width: 220px;
+  box-sizing: border-box;
+}
+
 .button-row {
   display: flex;
   justify-content: space-between;
@@ -653,6 +1149,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   align-items: center;
 }
+
 .task-list {
   margin-top: 0.8rem;
 }
@@ -670,30 +1167,22 @@ onBeforeUnmount(() => {
   justify-content: space-between;
   align-items: center;
 }
-.task-info {
-  display: flex;
-  flex-direction: column;
-}
+
+/* ===== 右侧结果区域 ===== */
 .result-area {
   flex: 1;
   display: flex;
   flex-direction: column;
   gap: 1rem;
 }
-.large-select {
-  width: 100%;
-  min-width: 220px;
-  max-width: 100%;
-  box-sizing: border-box;
-}
+
 .chart-header {
-  padding-bottom: 0.6rem;
   display: flex;
-  justify-content: flex-start;
   align-items: center;
-  background: #ffffff;
+  justify-content: flex-start;
+  padding: 0 0 0.6rem 8px;
+  background: #fff;
   border-radius: 8px 8px 0 0;
-  padding-left: 8px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.05);
 }
 .chart-area {
@@ -702,13 +1191,14 @@ onBeforeUnmount(() => {
   border-radius: 0 0 8px 8px;
   padding: 8px;
 }
+
 .stat-card {
-  background: #ffffff;
+  background: #fff;
   border-radius: 8px;
   padding: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.06);
   max-width: 100%;
-  overflow-x: auto;  
+  overflow-x: auto;
 }
 .stat-card h3 {
   margin: 0 0 8px 0;
@@ -721,12 +1211,44 @@ onBeforeUnmount(() => {
   justify-content: center;
   align-items: center;
 }
+
+/* ===== 模型训练面板 ===== */
+.model-train-panel {
+  padding: 10px 15px;
+}
+
+.param-label {
+  font-size: 14px;
+  color: #606266;
+  margin-bottom: 8px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.model-params-container .el-input-number {
+  width: 180px;
+  height: 32px;
+}
+
+/* 历史预测结果表格 */
+.history-prediction-table {
+  margin-top: 10px;
+}
+.history-prediction-table .el-table th,
+.history-prediction-table .el-table td {
+  text-align: center;
+  height: 40px;
+  font-size: 14px;
+}
+
+/* ===== 响应式布局 ===== */
 @media (max-width: 900px) {
   .forecast-content {
     flex-direction: column;
   }
   .control-panel {
     width: 100%;
+    max-width: 100%;
   }
 }
 </style>
