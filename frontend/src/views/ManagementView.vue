@@ -1,10 +1,12 @@
 <template>
   <div class="manage-container">
     <el-tabs v-model="activeTab" type="card" stretch>
+      
       <!-- 数据查询 Tab -->
       <el-tab-pane label="数据查询" name="query">
         <div class="query-panel">
           <el-form :model="queryForm" ref="queryFormRef" label-width="100px" inline>
+            
             <el-form-item label="起点城市">
               <el-cascader
                 v-model="queryForm.originCity"
@@ -37,11 +39,13 @@
             </el-form-item>
 
             <el-form-item>
-              <el-button type="primary" icon="el-icon-search" @click="searchData">查询</el-button>
-              <el-button icon="el-icon-refresh" @click="resetQuery">重置</el-button>
+              <el-button type="primary" @click="searchData">查询</el-button>
+              <el-button @click="resetQuery">重置</el-button>
             </el-form-item>
+
           </el-form>
 
+          <!-- 查询结果 -->
           <div class="query-table" v-if="tableData.length">
             <el-table :data="tableData" border stripe style="width: 100%">
               <el-table-column prop="origin" label="起点城市" min-width="100"/>
@@ -61,15 +65,13 @@
               :total="pagination.total"
               @size-change="handleSizeChange"
               @current-change="handleCurrentChange"
-              style="margin-top: 10px; text-align: right;"
-            >
-            </el-pagination>
+              class="pagination"
+            />
 
             <el-button
               type="success"
-              icon="el-icon-download"
               @click="exportData"
-              style="margin-top: 10px;"
+              class="export-btn"
             >
               导出查询结果
             </el-button>
@@ -86,7 +88,6 @@
         <div class="data-manage-panel">
           <el-button
             type="primary"
-            icon="el-icon-download"
             @click="downloadTemplate"
             class="download-btn"
           >
@@ -104,9 +105,8 @@
             :auto-upload="false"
             accept=".csv"
           >
-            <i class="el-icon-upload"></i>
             <div class="el-upload__text">拖拽或点击上传CSV数据文件</div>
-            <div class="el-upload__tip" slot="tip">只能上传CSV格式文件，且不超过5MB</div>
+            <div class="el-upload__tip">只能上传CSV格式文件，且不超过5MB</div>
           </el-upload>
 
           <div v-if="previewData.length" class="preview-table">
@@ -128,6 +128,7 @@
           </div>
         </div>
       </el-tab-pane>
+
     </el-tabs>
   </div>
 </template>
@@ -165,9 +166,7 @@ const cascaderProps = {
 }
 
 const filteredDestinationOptions = computed(() => {
-  if (!queryForm.originCity?.length || queryForm.originCity.length !== 2) {
-    return locationOptions.value
-  }
+  if (!queryForm.originCity?.length || queryForm.originCity.length !== 2) return locationOptions.value
   const [originProvince, originCity] = queryForm.originCity
   return locationOptions.value
     .map(province => {
@@ -179,8 +178,8 @@ const filteredDestinationOptions = computed(() => {
     .filter(Boolean)
 })
 
+// 查询/重置
 function searchData() {
-  // 模拟数据查询
   const data = [
     {origin:'北京', destination:'上海', date:'2024-01-01', capacity:1000, passengers:900, flights:30},
     {origin:'上海', destination:'广州', date:'2024-01-01', capacity:1200, passengers:1100, flights:28},
@@ -201,16 +200,17 @@ function resetQuery() {
   pagination.currentPage = 1
 }
 
+// 分页事件
 function handleSizeChange(size) {
   pagination.pageSize = size
   searchData()
 }
-
 function handleCurrentChange(page) {
   pagination.currentPage = page
   searchData()
 }
 
+// 导出 CSV
 function exportData() {
   if (!tableData.value.length) return
   const headers = Object.keys(tableData.value[0]).join(',')
@@ -223,6 +223,7 @@ function exportData() {
   URL.revokeObjectURL(link.href)
 }
 
+// 下载模板
 function downloadTemplate() {
   const csvContent =
     '航线起点,航线终点,时间,运力,运量,航班数\n北京,上海,2024-01,1000,900,30\n上海,广州,2024-01,1200,1100,28\n'
@@ -234,17 +235,12 @@ function downloadTemplate() {
   URL.revokeObjectURL(link.href)
 }
 
+// 上传文件校验
 function beforeUpload(file) {
   const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv')
   const isLt5M = file.size / 1024 / 1024 < 5
-  if (!isCSV) {
-    alert('只能上传CSV文件')
-    return false
-  }
-  if (!isLt5M) {
-    alert('文件大小不能超过5MB')
-    return false
-  }
+  if (!isCSV) { alert('只能上传CSV文件'); return false }
+  if (!isLt5M) { alert('文件大小不能超过5MB'); return false }
   return true
 }
 
@@ -252,33 +248,26 @@ function handleFileChange(file, fileListNew) {
   fileList.value = fileListNew
   if (!file.raw) return
   const reader = new FileReader()
-  reader.onload = e => {
-    parseCSVPreview(e.target.result)
-  }
+  reader.onload = e => { parseCSVPreview(e.target.result) }
   reader.readAsText(file.raw)
 }
 
 function parseCSVPreview(csvText) {
   const lines = csvText.split(/\r?\n/)
   const previewLines = lines.slice(0, 11)
-  if (previewLines.length < 2) {
-    previewData.value = []
-    previewColumns.value = []
-    return
-  }
+  if (previewLines.length < 2) { previewData.value = []; previewColumns.value = []; return }
   const headers = previewLines[0].split(',')
   previewColumns.value = headers
   const rows = previewLines.slice(1).map(line => {
     const vals = line.split(',')
     const obj = {}
-    headers.forEach((h, idx) => {
-      obj[h] = vals[idx]
-    })
+    headers.forEach((h, idx) => { obj[h] = vals[idx] })
     return obj
   })
   previewData.value = rows.filter(r => Object.values(r).some(v => v))
 }
 
+// 加载城市数据
 async function loadCityData() {
   try {
     const response = await fetch('/src/assets/城市经纬度.xlsx')
@@ -304,9 +293,7 @@ async function loadCityData() {
   }
 }
 
-onMounted(() => {
-  loadCityData()
-})
+onMounted(() => { loadCityData() })
 </script>
 
 <style scoped>
@@ -320,56 +307,63 @@ onMounted(() => {
   padding: 20px 10px;
 }
 
-.download-btn {
-  margin-bottom: 20px;
-  height: 32px;
-  font-size: 14px;
-  padding: 0 20px;
-}
-
-.query-panel .el-form-item,
-.data-manage-panel .el-upload {
+.el-form-item {
   margin-bottom: 20px;
 }
 
-.query-panel .el-cascader,
-.query-panel .el-date-picker {
+.el-cascader, .el-date-picker {
   width: 220px;
 }
 
-.query-table {
+/* 按钮统一样式，文字居中 */
+.el-button {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  font-size: 14px;
+  height: 32px;
+  padding: 0 16px;
+  line-height: normal;
+}
+
+/* 表格间距 */
+.query-table, .preview-table {
   margin-top: 20px;
 }
 
+/* 空数据样式 */
 .empty-data {
   margin-top: 50px;
   text-align: center;
 }
 
+/* 预览表格标题 */
 .preview-table h4 {
   font-size: 16px;
   font-weight: 500;
   margin-bottom: 15px;
 }
 
-.preview-table .el-table {
-  font-size: 14px;
-}
-
-.preview-table .el-table th,
-.preview-table .el-table td {
+/* 表格字体大小 */
+.el-table th, .el-table td {
   text-align: center;
   font-size: 14px;
   height: 40px;
 }
 
-.el-button {
-  display: flex !important; 
-  align-items: center !important;
-  justify-content: center !important;
-  line-height: normal !important;
-  padding: 0 20px; 
-  font-size: 14px;
-  height: 32px;
+/* 查询结果容器间距 */
+.query-table {
+  margin-top: 30px; /* 表格与上方表单间距增大 */
+}
+
+/* 分页栏间距 */
+.query-table .el-pagination {
+  margin-top: 20px; /* 分页栏与表格间距增大 */
+  text-align: right;
+}
+
+/* 导出按钮间距 */
+.query-table .export-btn {
+  margin-top: 20px; /* 按钮与分页栏间距增大 */
 }
 </style>

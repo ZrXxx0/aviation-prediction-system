@@ -194,7 +194,7 @@
             </el-form-item>
 
             <el-form-item label="模型超参数">
-              <el-divider content-position="left" style="margin:16px 0 8px 0;">{{ trainForm.selectedModel }} 参数</el-divider>
+              <el-divider content-position="left" style="margin:16px 0 24px 0;">{{ trainForm.selectedModel }} 参数</el-divider>
               <el-row :gutter="20" align="middle" style="margin-bottom:24px;">
                 <!-- XGBoost 参数 -->
                 <template v-if="trainForm.selectedModel === 'XGBoost'">
@@ -242,7 +242,7 @@
 
                 <!-- SARIMA 参数 -->
                 <template v-if="trainForm.comboModel === 'sarima'">
-                  <el-divider content-position="left" style="margin:16px 0 8px 0;">SARIMA 参数</el-divider>
+                  <el-divider content-position="left" style="margin:24px 0 24px 0;">SARIMA 参数</el-divider>
                   <el-col :span="4">
                     <div class="param-label">d</div>
                     <el-input-number v-model="trainForm.hyperParams.sarima.d" :min="0" :max="3" controls-position="right" style="width:100%"/>
@@ -265,7 +265,7 @@
 
                 <!-- SVR 参数 -->
                 <template v-if="trainForm.comboModel === 'svr'">
-                  <el-divider content-position="left" style="margin:16px 0 8px 0;">SVR 参数</el-divider>
+                  <el-divider content-position="left" style="margin:24px 0 24px 0;">SVR 参数</el-divider>
                   <el-col :span="4">
                     <div class="param-label">核函数</div>
                     <el-select v-model="trainForm.hyperParams.svr.kernel" placeholder="选择核函数" style="width:100%;">
