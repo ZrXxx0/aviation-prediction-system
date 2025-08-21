@@ -1,5 +1,7 @@
 import os
 import json
+from typing import Optional
+
 import pandas as pd
 import numpy as np
 import math
@@ -13,7 +15,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ObjectDoesNotExist
 import copy
 
-from .models import RouteModelInfo, PretrainRecord
+from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord
 from show.models import AirportInfo
 from .predictive_algorithm.pretrain_single_route import pretrain_single_route
 from .predictive_algorithm.predict_single_route import predict_single_route
@@ -30,7 +32,12 @@ predictive_algorithm_dir = os.path.join(current_dir, 'predictive_algorithm')
 if predictive_algorithm_dir not in sys.path:
     sys.path.insert(0, predictive_algorithm_dir)
 
-
+# --- 辅助：标准化日期成 YYYY-MM ---
+def _to_year_month(s: Optional[str]):
+    if not s:
+        return None
+    s = s.strip()
+    return s[:7] if len(s) >= 7 else s
 
 def _to_bool(s: str, default=True):
     if s is None:
@@ -43,7 +50,7 @@ def get_codes_by_city(city_name: str):
         AirportInfo.objects.filter(city=city_name).values_list("code", flat=True)
     )
 
-# --- 工具：三字码 -> 城市/机场信息（来自 show.AirportInfo）---
+# --- 工具：机场三字码 -> 城市/机场信息（来自 show.AirportInfo）---
 def build_info(iata_code: str):
     try:
         a = AirportInfo.objects.get(code=iata_code.upper())
@@ -950,5 +957,82 @@ def get_pretrain_models(request):
         }, status=500)
 
 
+def query_flight_market(request):
+    """
+    查询航线市场数据（直接查表，不做聚合，返回前1000条，按 year_month 升序）
+
+    参数（可选，未传则全选）:
+    - origin: 起点机场三字码，支持逗号分隔
+    - destination: 终点机场三字码，支持逗号分隔
+    - start_date: 开始日期 (YYYY-MM 或 YYYY-MM-DD)
+    - end_date: 结束日期 (YYYY-MM 或 YYYY-MM-DD)
+    """
+    try:
+        qs = FlightMarketRecord.objects.all()
+
+        # 参数
+        origin = request.GET.get("origin")
+        destination = request.GET.get("destination")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        if origin:
+            qs = qs.filter(origin__in=[x.strip().upper() for x in origin.split(",") if x.strip()])
+        if destination:
+            qs = qs.filter(destination__in=[x.strip().upper() for x in destination.split(",") if x.strip()])
+
+        start_month = _to_year_month(start_date)
+        end_month = _to_year_month(end_date)
+        if start_month and end_month:
+            qs = qs.filter(year_month__gte=start_month, year_month__lte=end_month)
+        elif start_month:
+            qs = qs.filter(year_month__gte=start_month)
+        elif end_month:
+            qs = qs.filter(year_month__lte=end_month)
+
+        # 排序 + 限制
+        records = qs.values(
+            "year_month",
+            "origin", "destination",
+            "distance_km",
+            "route_total_flights", "route_total_seats",
+            "route_total_flight_time", "route_avg_flight_time",
+            "con_total_est_pax", "first", "business", "premium",
+            "full_y", "disc_y",
+            "avg_yield", "avg_first", "avg_business", "avg_premium",
+            "avg_full_y", "avg_disc_y",
+            "region",
+            "total_est_pax", "local_est_pax", "behind_est_pax",
+            "bridge_est_pax", "beyond_est_pax",
+            "avg_fare_usd", "local_fare", "behind_fare",
+            "bridge_fare", "beyond_fare",
+            "o_gdp", "o_population", "third_industry_x",
+            "o_revenue", "o_retail", "o_labor", "o_air_traffic",
+            "d_gdp", "d_population", "third_industry_y",
+            "d_revenue", "d_retail", "d_labor", "d_air_traffic",
+        ).distinct().order_by("year_month")[:1000]
+
+        # 转换 origin / destination 三字码 -> 机场信息
+        data = []
+        for r in records:
+            r = dict(r)  # values() 返回的是 dict-like
+            r["origin"] = build_info(r["origin"])
+            r["destination"] = build_info(r["destination"])
+            data.append(r)
+
+        return JsonResponse({
+            "success": True,
+            "count": len(data),
+            "data": data
+        }, status=200)
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({
+            "success": False,
+            "error": "系统异常",
+            "message": str(e)
+        }, status=500)
 
 

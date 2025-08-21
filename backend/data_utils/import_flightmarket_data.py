@@ -9,10 +9,14 @@ from datetime import datetime
 
 import numpy as np
 import pandas as pd
+import sys
 
-# 1) 设置 Django 环境（按你的项目修改）
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "AirlinePredictSystem.settings")
+# ========= Django 初始化 =========
+PROJECT_ROOT = r"D:\desk\project\backend"  # 项目根目录（manage.py 所在）
+sys.path.append(PROJECT_ROOT)
+
 import django
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "AirlinePredictSystem.settings")  # 改成你的 settings 模块
 django.setup()
 
 from django.db import transaction, close_old_connections
