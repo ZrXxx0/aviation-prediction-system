@@ -1,7 +1,5 @@
 import os
 import json
-from typing import Optional
-
 import pandas as pd
 import numpy as np
 import math
@@ -15,7 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ObjectDoesNotExist
 import copy
 
-from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord
+from .models import RouteModelInfo, PretrainRecord
 from show.models import AirportInfo
 from .predictive_algorithm.pretrain_single_route import pretrain_single_route
 from .predictive_algorithm.predict_single_route import predict_single_route
@@ -32,12 +30,7 @@ predictive_algorithm_dir = os.path.join(current_dir, 'predictive_algorithm')
 if predictive_algorithm_dir not in sys.path:
     sys.path.insert(0, predictive_algorithm_dir)
 
-# --- 辅助：标准化日期成 YYYY-MM ---
-def _to_year_month(s: Optional[str]):
-    if not s:
-        return None
-    s = s.strip()
-    return s[:7] if len(s) >= 7 else s
+
 
 def _to_bool(s: str, default=True):
     if s is None:
@@ -50,7 +43,7 @@ def get_codes_by_city(city_name: str):
         AirportInfo.objects.filter(city=city_name).values_list("code", flat=True)
     )
 
-# --- 工具：机场三字码 -> 城市/机场信息（来自 show.AirportInfo）---
+# --- 工具：三字码 -> 城市/机场信息（来自 show.AirportInfo）---
 def build_info(iata_code: str):
     try:
         a = AirportInfo.objects.get(code=iata_code.upper())
@@ -362,12 +355,18 @@ def forecast_route_view(request):
                         'time_granularity': 'monthly',
                         'prediction_periods': months,
                         'model_id': pred['monthly_model_id'],
+                        # 透传经济尾部处理参数（可选）
+                        'economic_tail_method': pred.get('economic_tail_method'),
+                        'economic_growth_rate': pred.get('economic_growth_rate'),
                     }
                     quarterly_req = {
                         **base,
                         'time_granularity': 'quarterly',
                         'prediction_periods': q_periods,
                         'model_id': pred['quarterly_model_id'],
+                        # 透传经济尾部处理参数（可选）
+                        'economic_tail_method': pred.get('economic_tail_method'),
+                        'economic_growth_rate': pred.get('economic_growth_rate'),
                     }
 
                     # 1. 执行两套模型预测
@@ -957,6 +956,7 @@ def get_pretrain_models(request):
         }, status=500)
 
 
+
 def query_flight_market(request):
     """
     查询航线市场数据（直接查表，不做聚合，返回前1000条，按 year_month 升序）
@@ -1034,5 +1034,7 @@ def query_flight_market(request):
             "error": "系统异常",
             "message": str(e)
         }, status=500)
+
+
 
 

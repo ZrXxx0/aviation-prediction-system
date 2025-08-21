@@ -22,7 +22,9 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
                  economic_prefixes=(
                     'O_GDP','O_Population','Third_Industry_x','O_Revenue','O_Retail','O_Labor','O_Air_Traffic',
                     'D_GDP','D_Population','Third_Industry_y','D_Revenue','D_Retail','D_Labor','D_Air_Traffic'
-                 )):
+                 ),
+                 economic_tail_method='linear',
+                 economic_growth_rate=0.02):
         """
         Args:
             fill_method (str): 主填充方法 ['interp'|'zero'|'regression']
@@ -34,6 +36,8 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             forecast_horizon (int): 最大预测步长
             non_economic_tail_window (int): 非经济数据列尾部填充使用的窗口大小（月数）
             economic_prefixes (tuple): 经济数据列的前缀列表
+            economic_tail_method (str): 经济数据列尾部填充方法 ['linear'|'growth_rate']，默认'linear'
+            economic_growth_rate (float): 当使用'growth_rate'时的每期增长率（相对上一期），例如0.02表示+2%
         """
         self.fill_method = fill_method
         self.max_invalid_ratio = max_invalid_ratio
@@ -44,6 +48,8 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
         self.non_economic_tail_window = non_economic_tail_window
         self.non_economic_model = non_economic_model
         self.forecast_horizon = forecast_horizon
+        self.economic_tail_method = economic_tail_method
+        self.economic_growth_rate = economic_growth_rate
         self.scaler = None
         self.binary_columns = []
         self.column_stats = {}
@@ -283,29 +289,42 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
         return ts
 
     def _economic_tail_fill(self, ts, time_series, fit_data, tail_na):
-        """经济数据列的尾部填充 - 时间序列回归"""
+        """经济数据列的尾部填充 - 支持线性外推或按增长率递推"""
+        num_missing = len(tail_na)
+
+        # 优先：固定增长率递推（相对上一期的同比增幅）
+        if getattr(self, 'economic_tail_method', 'linear') == 'growth_rate':
+            try:
+                last_value = float(fit_data.iloc[-1])
+            except Exception:
+                last_value = fit_data.iloc[-1]
+            rate = float(getattr(self, 'economic_growth_rate', 0.0) or 0.0)
+            # 生成按期递推的值：v_t = v_{t-1} * (1 + rate)
+            predicted = [last_value * ((1.0 + rate) ** i) for i in range(1, num_missing + 1)]
+            ts.loc[tail_na.index] = predicted
+            return ts
+
+        # 默认：线性外推（基于时间戳做线性回归）
         # 时间戳处理
         time_values = time_series.astype('int64')
-        
+
         if len(fit_data) < self.min_fit_points:
-            # 有效点不足，使用简单外推
+            # 有效点不足，使用最后一个有效值外推
             last_value = fit_data.iloc[-1]
             ts.loc[tail_na.index] = last_value
             return ts
-        
+
         try:
-            # 时间序列回归
-            # print('regression')
             x_fit = time_values.loc[fit_data.index].values.astype(float)
             y_fit = fit_data.values.astype(float)
-            
+
             # 线性回归
-            slope, intercept, r_value, p_value, std_err = stats.linregress(x_fit, y_fit)
-            
+            slope, intercept, _r_value, _p_value, _std_err = stats.linregress(x_fit, y_fit)
+
             # 预测尾部
             x_predict = time_values.loc[tail_na.index].values.astype(float)
             predicted = slope * x_predict + intercept
-            
+
             # 应用预测结果
             ts.loc[tail_na.index] = predicted
         except Exception as e:
@@ -313,7 +332,7 @@ class DataPreprocessor(BaseEstimator, TransformerMixin):
             warnings.warn(f"Regression failed: {str(e)}. Using last valid value.")
             last_value = fit_data.iloc[-1]
             ts.loc[tail_na.index] = last_value
-        
+
         return ts
     
     def _advanced_tail_forecast(self, ts, time_series, fit_data, tail_na, col_name):
