@@ -8,45 +8,75 @@ django.setup()
 
 from show.models import RouteMonthlyStat
 
-# 将csv文件导入数据库
-# import_routes效率慢，建议采用import_routes2
-def import_csv_to_db(csv_path):
+# 导入未导入的数据
+
+def safe_float(val):
+    return float(val) if pd.notna(val) else None
+
+def safe_int(val):
+    return int(val) if pd.notna(val) else None
+
+def import_bulk(csv_path, batch_size=1000):
     df = pd.read_csv(csv_path)
 
-    # 去除列名两端空格（避免因为拼错或含空格而找不到字段）
-    df.columns = df.columns.str.strip()
+    df.drop_duplicates(subset=['YearMonth', 'Origin', 'Destination'], inplace=True)
+    df = df[pd.notna(df['Origin']) & pd.notna(df['Destination']) & pd.notna(df['YearMonth'])]
 
-    for _, row in df.iterrows():
-        # 处理时间
+    # 查询已有主键组合用于跳过重复导入
+    existing_keys = set(RouteMonthlyStat.objects.values_list(
+        'origin_code', 'destination_code', 'year', 'month'
+    ))
+
+    to_create = []
+    failed_rows = []
+    success_count = 0
+
+    total = len(df)
+    print(f"📦 正在批量导入，共 {total} 条记录...")
+
+    for i, row in df.iterrows():
         try:
-            year_month = pd.to_datetime(row['YearMonth'], errors='coerce')
-            if pd.isna(year_month):
-                raise ValueError("无法解析日期")
+            year_month = pd.to_datetime(row['YearMonth'])
             year = year_month.year
             month = year_month.month
-        except Exception as e:
-            print(f"❌ 时间解析失败：{row.get('YearMonth')} -- {e}")
-            continue
+            key = (row['Origin'], row['Destination'], year, month)
 
-        try:
-            passenger_volume = float(row.get('Con Total Est. Pax', 0) or 0)
-            total_seats = float(row.get('Route_Total_Seats', 0) or 0)
-            total_flights = int(row.get('Route_Total_Flights', 0) or 0)
+            if key in existing_keys:
+                continue
 
-            RouteMonthlyStat.objects.update_or_create(
-                origin_code=row.get('Origin', '').strip(),
-                destination_code=row.get('Destination', '').strip(),
+            obj = RouteMonthlyStat(
+                origin_code=row['Origin'].strip(),
+                destination_code=row['Destination'].strip(),
                 year=year,
                 month=month,
-                defaults={
-                    'passenger_volume': passenger_volume,
-                    'Route_Total_Seats': total_seats,
-                    'Route_Total_Flights': total_flights,
-                }
+                passenger_volume=safe_float(row.get('Con Total Est. Pax')),
+                Route_Total_Seats=safe_float(row.get('Route_Total_Seats')),
+                Route_Total_Flights=safe_int(row.get('Route_Total_Flights')),
             )
-            print(f"✅ 成功导入：{row['Origin']} → {row['Destination']} {year}-{month}")
+            to_create.append(obj)
+            success_count += 1
+
+            # 到达批次大小就入库
+            if len(to_create) >= batch_size:
+                RouteMonthlyStat.objects.bulk_create(to_create)
+                to_create.clear()
+                print(f"🚀 批次入库成功，总导入：{success_count} 条")
+
         except Exception as e:
-            print(f"❌ 导入失败：{row.get('Origin')} → {row.get('Destination')} {year}-{month} -- {e}")
+            failed_rows.append(row)
+            print(f"❌ 第{i+1}条导入失败：{row.get('Origin')} → {row.get('Destination')} - {e}")
+
+    # 剩余未提交的入库
+    if to_create:
+        RouteMonthlyStat.objects.bulk_create(to_create)
+        print(f"✅ 最后批次导入成功，共导入 {success_count} 条")
+
+    # 失败数据保存
+    if failed_rows:
+        pd.DataFrame(failed_rows).to_csv("failed_bulk_rows.csv", index=False)
+        print("⚠️ 部分数据导入失败，已保存到 failed_bulk_rows.csv")
+
+    print(f"🎉 批量导入完成，总成功：{success_count} 条，失败：{len(failed_rows)} 条")
 
 if __name__ == "__main__":
-    import_csv_to_db("D:/desk/Airlinepredict/aviation-prediction/final_data_0622.csv")
+    import_bulk("./final_data_0729.csv", batch_size=1000)
