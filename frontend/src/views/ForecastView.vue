@@ -110,10 +110,30 @@
                 >
                   <el-table-column prop="route" label="航线" min-width="180" />
                   <el-table-column prop="model" label="模型" min-width="150" />
-                  <el-table-column prop="mae" label="MAE" min-width="100" />
-                  <el-table-column prop="rmse" label="RMSE" min-width="100" />
-                  <el-table-column prop="mape" label="MAPE (%)" min-width="100" />
-                  <el-table-column prop="r2" label="R²" min-width="100" />
+                  <el-table-column 
+                    prop="mae" 
+                    label="MAE" 
+                    min-width="100"
+                    :formatter="(row) => row.mae.toFixed(2)"
+                  />
+                  <el-table-column 
+                    prop="rmse" 
+                    label="RMSE" 
+                    min-width="100"
+                    :formatter="(row) => row.rmse.toFixed(2)"
+                  />
+                  <el-table-column 
+                    prop="mape" 
+                    label="MAPE (%)" 
+                    min-width="100"
+                    :formatter="(row) => (row.mape * 100).toFixed(2) + '%'"
+                  />
+                  <el-table-column 
+                    prop="r2" 
+                    label="R²" 
+                    min-width="100"
+                    :formatter="(row) => row.r2.toFixed(2)"
+                  />
                 </el-table>
                 <div v-else class="empty-wrap">
                   <el-empty description="暂无预测结果" />
@@ -175,7 +195,7 @@
                   max-height="200"
                 >
                   <el-table-column prop="date" label="日期" width="160" />
-                  <el-table-column label="模型" width="280">
+                  <el-table-column label="模型" width="300">
                     <template #default="scope">
                       <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span>{{ scope.row.model }}</span>
@@ -183,9 +203,24 @@
                       </div>
                     </template>
                   </el-table-column>
-                  <el-table-column prop="mae" label="MAE" width="140" />
-                  <el-table-column prop="mape" label="MAPE (%)" width="140" />
-                  <el-table-column prop="rmse" label="RMSE" width="140" />
+                  <el-table-column 
+                    prop="mae" 
+                    label="MAE" 
+                    width="140" 
+                    :formatter="(row) => row.mae.toFixed(2)"
+                  />
+                  <el-table-column 
+                    prop="mape" 
+                    label="MAPE (%)" 
+                    width="140" 
+                    :formatter="(row) => (row.mape * 100).toFixed(2) + '%'"
+                  />
+                  <el-table-column 
+                    prop="rmse" 
+                    label="RMSE" 
+                    width="140" 
+                    :formatter="(row) => row.rmse.toFixed(2)"
+                  />
                 </el-table>
               </div>
             </el-form-item>
@@ -439,7 +474,6 @@
               {{ Number(scope.row.test_r2).toFixed(4) }}
             </template>
           </el-table-column>
-
         </el-table>
         <div style="text-align:right;">
           <el-button type="primary" @click="saveModel" :loading="savingModel" style="margin-top:16px;">保存模型</el-button>
@@ -815,77 +849,6 @@ async function runForecast() {
     console.log('预测请求参数:', payload)
     const url = 'http://localhost:8000/predict/forecast/run/'
     const res = await axios.post(url, payload)
-    // 真实请求（目前注释掉，前端直接使用静态数据）
-    // const url = api.getUrl(api.endpoints.PREDICT.FORECAST + 'run/')
-    // const res = await axios.post(url, { predictions: tasks.value }, { timeout: api.getTimeout() })
-    
-    // ==== 静态模拟返回数据 ====
-    // const res = {
-    //   success: true,
-    //   data: [
-    //     {
-    //       model_info: {
-    //         origin_airport: "CAN",
-    //         destination_airport: "PEK",
-    //         model_id: "CAN_PEK_20250813233015",
-    //         model_type: "lgb",
-    //         train_mae: 33651.78,
-    //         train_rmse: 41485.83,
-    //         train_mape: 0.02,
-    //         train_r2: 1.0,
-    //         test_mae: 66841.01,
-    //         test_rmse: 67048.82,
-    //         test_mape: 0.05,
-    //         test_r2: -2.6
-    //       },
-    //       prediction_results: {
-    //         historical_data: [
-    //           { time_point: "2024-01", value: 7645 },
-    //           { time_point: "2024-02", value: 28280 },
-    //           { time_point: "2024-03", value: 8280 },
-    //           { time_point: "2024-04", value: 9280 },
-    //           { time_point: "2024-05", value: 23239 }
-    //         ],
-    //         future_predictions: [
-    //           { time_point: "2024-06", value: 23395 },
-    //           { time_point: "2024-07", value: 25165 },
-    //           { time_point: "2024-08", value: 7187 }
-    //         ]
-    //       }
-    //     },
-    //     {
-    //       model_info: {
-    //         origin_airport: "CAN",
-    //         destination_airport: "PVG",
-    //         model_id: "CAN_PVG_20250813233021",
-    //         model_type: "lgb",
-    //         train_mae: 2818.41,
-    //         train_rmse: 5937.08,
-    //         train_mape: 0.03,
-    //         train_r2: 0.99,
-    //         test_mae: 66757.35,
-    //         test_rmse: 73711.61,
-    //         test_mape: 0.29,
-    //         test_r2: -3.31
-    //       },
-    //       prediction_results: {
-    //         historical_data: [
-    //           { time_point: "2024-01", value: 14222 },
-    //           { time_point: "2024-02", value: 13837 },
-    //           { time_point: "2024-03", value: 14837 },
-    //           { time_point: "2024-04", value: 16837 },
-    //           { time_point: "2024-05", value: 14932 }
-    //         ],
-    //         future_predictions: [
-    //           { time_point: "2024-06", value: 8526 },
-    //           { time_point: "2024-07", value: 3518 },
-    //           { time_point: "2024-08", value: 9173 }
-    //         ]
-    //       }
-    //     }
-    //   ]
-    // }
-
     console.log('预测返回结果:', res)
 
     // 正确的取法：res.data.data 是数组
@@ -1005,6 +968,7 @@ const showDetailDialog = ref(false)
 const detailModel = ref(null)
 const pretrainModelId = ref(null)
 
+// 显示模型详情
 function showModelDetail(row) {
   let params = {}
   if (row.model.includes('XGBoost')) {
