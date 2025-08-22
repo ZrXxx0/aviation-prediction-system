@@ -11,9 +11,10 @@ from django.http import JsonResponse
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ObjectDoesNotExist
+from typing import Optional
 import copy
 
-from .models import RouteModelInfo, PretrainRecord
+from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord
 from show.models import AirportInfo
 from .predictive_algorithm.pretrain_single_route import pretrain_single_route
 from .predictive_algorithm.predict_single_route import predict_single_route
@@ -30,7 +31,12 @@ predictive_algorithm_dir = os.path.join(current_dir, 'predictive_algorithm')
 if predictive_algorithm_dir not in sys.path:
     sys.path.insert(0, predictive_algorithm_dir)
 
-
+# --- 辅助：标准化日期成 YYYY-MM ---
+def _to_year_month(s: Optional[str]):
+    if not s:
+        return None
+    s = s.strip()
+    return s[:7] if len(s) >= 7 else s
 
 def _to_bool(s: str, default=True):
     if s is None:
