@@ -7,33 +7,33 @@
         <div class="query-panel">
           <el-form :model="queryForm" ref="queryFormRef" label-width="100px" inline>
             
-            <el-form-item label="起点城市">
+            <el-form-item label="起点机场">
               <el-cascader
                 v-model="queryForm.originCity"
                 :options="locationOptions"
                 :props="cascaderProps"
                 clearable
-                placeholder="选择起点城市"
+                placeholder="选择起点机场"
               />
             </el-form-item>
 
-            <el-form-item label="终点城市">
+            <el-form-item label="终点机场">
               <el-cascader
                 v-model="queryForm.destinationCity"
                 :options="filteredDestinationOptions"
                 :props="cascaderProps"
                 clearable
-                placeholder="选择终点城市"
+                placeholder="选择终点机场"
               />
             </el-form-item>
 
             <el-form-item label="时间范围">
               <el-date-picker
                 v-model="queryForm.dateRange"
-                type="daterange"
-                start-placeholder="开始日期"
-                end-placeholder="结束日期"
-                value-format="yyyy-MM-dd"
+                type="monthrange"
+                start-placeholder="开始月份"
+                end-placeholder="结束月份"
+                value-format="YYYY-MM"
                 clearable
               />
             </el-form-item>
@@ -48,8 +48,8 @@
           <!-- 查询结果 -->
           <div class="query-table" v-if="tableData.length">
             <el-table :data="tableData" border stripe style="width: 100%">
-              <el-table-column prop="origin" label="起点城市" min-width="100"/>
-              <el-table-column prop="destination" label="终点城市" min-width="100"/>
+              <el-table-column prop="origin" label="起点机场" min-width="100"/>
+              <el-table-column prop="destination" label="终点机场" min-width="100"/>
               <el-table-column prop="date" label="时间" min-width="120"/>
               <el-table-column prop="capacity" label="运力" min-width="100"/>
               <el-table-column prop="passengers" label="运量" min-width="100"/>
@@ -137,7 +137,6 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
-import * as XLSX from 'xlsx'
 
 const activeTab = ref('query')
 const fileList = ref([])
@@ -167,33 +166,67 @@ const cascaderProps = {
   children: 'children'
 }
 
+// 过滤终点机场，避免选择和起点相同
 const filteredDestinationOptions = computed(() => {
-  if (!queryForm.originCity?.length || queryForm.originCity.length !== 2) return locationOptions.value
-  const [originProvince, originCity] = queryForm.originCity
-  return locationOptions.value
-    .map(province => {
-      const filteredChildren = province.children.filter(city =>
-        !(province.value === originProvince && city.value === originCity)
-      )
-      return filteredChildren.length ? { ...province, children: filteredChildren } : null
-    })
-    .filter(Boolean)
+  if (!queryForm.originCity?.length || queryForm.originCity.length !== 3) return locationOptions.value
+  const [originProvince, originCity, originIATA] = queryForm.originCity
+  return locationOptions.value.map(province => ({
+    ...province,
+    children: province.children.map(city => ({
+      ...city,
+      children: city.children.filter(airport => airport.value !== originIATA)
+    }))
+  }))
 })
 
-// 查询/重置
-function searchData() {
-  const data = [
-    {origin:'北京', destination:'上海', date:'2024-01-01', capacity:1000, passengers:900, flights:30},
-    {origin:'上海', destination:'广州', date:'2024-01-01', capacity:1200, passengers:1100, flights:28},
-    {origin:'北京', destination:'广州', date:'2024-01-02', capacity:1100, passengers:1000, flights:29}
-  ]
-  tableData.value = data.slice(
-    (pagination.currentPage - 1) * pagination.pageSize,
-    pagination.currentPage * pagination.pageSize
-  )
-  pagination.total = data.length
+// 查询
+async function searchData() {
+  try {
+    const params = new URLSearchParams();
+
+    if (queryForm.originCity?.length === 3)
+      params.append('origin', queryForm.originCity[2]);
+    if (queryForm.destinationCity?.length === 3)
+      params.append('destination', queryForm.destinationCity[2]);
+
+    if (queryForm.dateRange?.length === 2) {
+      // 直接使用 picker 返回的字符串
+      params.append('start_date', queryForm.dateRange[0]);
+      params.append('end_date', queryForm.dateRange[1]);
+    }
+
+    const url = `http://localhost:8000/predict/data/get_flightdata/?${params.toString()}`
+    const res = await fetch(url)
+    const result = await res.json()
+
+    if (!result.success) {
+      alert('数据请求失败，请重试')
+      return
+    }
+
+    const rawData = result.data || []
+
+    // 前端分页
+    pagination.total = rawData.length
+    const start = (pagination.currentPage - 1) * pagination.pageSize
+    const end = pagination.currentPage * pagination.pageSize
+
+    tableData.value = rawData.slice(start, end).map(item => ({
+      origin: item.origin.code,
+      destination: item.destination.code,
+      date: item.year_month,
+      capacity: item.route_total_seats,
+      passengers: item.route_total_flights,
+      flights: item.route_total_flights
+    }))
+
+  } catch (error) {
+    console.error('查询失败:', error)
+    alert('查询失败，请检查网络或后端服务')
+  }
 }
 
+//重置
 function resetQuery() {
   queryForm.originCity = []
   queryForm.destinationCity = []
@@ -269,33 +302,44 @@ function parseCSVPreview(csvText) {
   previewData.value = rows.filter(r => Object.values(r).some(v => v))
 }
 
-// 加载城市数据
-async function loadCityData() {
+// 加载机场数据
+async function loadAirportData() {
   try {
-    const response = await fetch('/src/assets/城市经纬度.xlsx')
-    const arrayBuffer = await response.arrayBuffer()
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const data = XLSX.utils.sheet_to_json(sheet)
-    const cityMapTemp = {}
-    data.forEach(row => {
-      const province = row['省份']
-      const city = row['城市']
-      if (!cityMapTemp[province]) cityMapTemp[province] = []
-      cityMapTemp[province].push(city)
+    const response = await fetch('/src/assets/iata_city_airport_mapping.json')
+    const data = await response.json()
+
+    const provinceMap = {}
+
+    // 遍历 JSON 构造层级结构
+    Object.entries(data).forEach(([iata, info]) => {
+      const { province, city, airport } = info
+
+      if (!provinceMap[province]) provinceMap[province] = {}
+      if (!provinceMap[province][city]) provinceMap[province][city] = []
+
+      provinceMap[province][city].push({
+        label: airport,   // 前端显示机场名称
+        value: iata       // 最终传给后端的三字码
+      })
     })
-    locationOptions.value = Object.keys(cityMapTemp).map(province => ({
+
+    // 转换成 Cascader 所需格式
+    locationOptions.value = Object.entries(provinceMap).map(([province, cities]) => ({
       label: province,
       value: province,
-      children: cityMapTemp[province].map(city => ({ label: city, value: city }))
+      children: Object.entries(cities).map(([city, airports]) => ({
+        label: city,
+        value: city,
+        children: airports
+      }))
     }))
   } catch (error) {
-    console.error('加载城市数据失败:', error)
-    alert('加载城市数据失败，请刷新页面重试')
+    console.error('加载机场数据失败:', error)
+    alert('加载机场数据失败，请刷新页面重试')
   }
 }
 
-onMounted(() => { loadCityData() })
+onMounted(() => { loadAirportData() })
 </script>
 
 <style scoped>

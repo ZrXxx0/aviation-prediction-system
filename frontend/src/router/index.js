@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import DashboardView from '@/views/DashboardView.vue'
 import ForecastView from '@/views/ForecastView.vue'
 import ManagementView from '@/views/ManagementView.vue'
+import ForecastManager from '@/views/ForecastManager.vue'
 
 const routes = [
     {
@@ -16,7 +17,7 @@ const routes = [
     {
         path: '/forecast',
         name: 'Forecast',
-        component: ForecastView
+        component: ForecastManager
     },
     {
         path: '/management',
