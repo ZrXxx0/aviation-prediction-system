@@ -415,10 +415,31 @@
       <div v-if="trainingDialogLoading">模型训练中，请稍候...</div>
       <div v-else>
         <el-table :data="evaluationResults" style="margin: 24px 0;">
-          <el-table-column prop="test_mae" label="MAE" />
-          <el-table-column prop="test_MAPE" label="MAPE (%)" />
-          <el-table-column prop="test_RMSE" label="RMSE" />
-          <el-table-column prop="test_r2" label="R_Square" />
+          <!-- MAE 保留 2 位小数 -->
+          <el-table-column prop="test_mae" label="MAE">
+            <template #default="scope">
+              {{ Number(scope.row.test_mae).toFixed(2) }}
+            </template>
+          </el-table-column>
+          <!-- MAPE 转百分比并保留 2 位小数 -->
+          <el-table-column prop="test_mape" label="MAPE (%)">
+            <template #default="scope">
+              {{ (Number(scope.row.test_mape) * 100).toFixed(2) }}%
+            </template>
+          </el-table-column>
+          <!-- RMSE 保留 2 位小数 -->
+          <el-table-column prop="test_rmse" label="RMSE">
+            <template #default="scope">
+              {{ Number(scope.row.test_rmse).toFixed(2) }}
+            </template>
+          </el-table-column>
+          <!-- R² 保留 4 位小数 -->
+          <el-table-column prop="test_r2" label="R²">
+            <template #default="scope">
+              {{ Number(scope.row.test_r2).toFixed(4) }}
+            </template>
+          </el-table-column>
+
         </el-table>
         <div style="text-align:right;">
           <el-button type="primary" @click="saveModel" :loading="savingModel" style="margin-top:16px;">保存模型</el-button>
@@ -442,6 +463,21 @@
             <div v-else>无参数信息</div>
           </el-descriptions-item>
         </el-descriptions>
+      </div>
+    </el-dialog>
+    <!-- 处理中的提示弹窗 -->
+    <el-dialog
+      v-model="showProcessing"
+      title="提示"
+      width="300px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      align-center
+    >
+      <div style="text-align: center; padding: 20px;">
+        <el-icon class="is-loading" size="32"><Loading /></el-icon>
+        <p style="margin-top: 12px;">正在预测中，请稍候...</p>
       </div>
     </el-dialog>
   </div>
@@ -512,7 +548,7 @@ const economic_growth_rate = ref(5)    // 指定增长率
 const modelType = ref('')
 const models = ref([])
 const loadingModels = ref(false)
-const showTrain = ref(true)
+const showTrain = ref(false)
 const isConfigured = ref(false)
 const tasks = ref([])
 const performanceTable = ref([])
@@ -525,6 +561,7 @@ const tempQuarterlyModel = ref('')
 const monthlyModels = ref([])
 const quarterlyModels = ref([])
 
+const showProcessing = ref(false)
 const chartRef = ref(null)
 let chartInstance = null
 
@@ -746,6 +783,7 @@ async function runForecast() {
     return
   }
   try {
+    showProcessing.value = true
     const payload = {
       predictions: tasks.value.map(task => {
         return {
@@ -905,7 +943,8 @@ async function runForecast() {
 
     renderChart(xLabels, allSeries)
     performanceTable.value = performance
-
+    showProcessing.value = false // 请求完成后关闭
+    
   } catch (err) {
     console.error('预测失败:', err)
   }
@@ -964,6 +1003,7 @@ const trainingDialogLoading = ref(false)
 const savingModel = ref(false)
 const showDetailDialog = ref(false)
 const detailModel = ref(null)
+const pretrainModelId = ref(null)
 
 function showModelDetail(row) {
   let params = {}
@@ -1152,7 +1192,9 @@ async function startTraining() {
     console.log('训练返回结果:', result)
     // 假设后端返回 { success:true, results:[{date, model, mae, mape, rmse}, ...] }
     evaluationResults.value = result.training_result ? [result.training_result] : []
+    pretrainModelId.value = result.record_id || null
     console.log('评估结果:', evaluationResults.value)
+    console.log('预训练记录 ID:', pretrainModelId.value)
   } catch (error) {
     alert('训练失败')
   } finally {
@@ -1164,12 +1206,26 @@ async function startTraining() {
 async function saveModel() {
   savingModel.value = true
   try {
-    setTimeout(() => {
+    const payload = {
+      pretrain_record_id: pretrainModelId.value,
+      remark: "正式训练测试"
+    }
+    console.log("保存模型请求 payload:", payload)
+    // 发送保存请求
+    const response = await axios.post(
+      "http://localhost:8000/predict/formal/train/",
+      payload
+    )
+
+    if (response.data.success) {
       showTrainingDialog.value = false
-      savingModel.value = false
-    }, 1000)
+    } else {
+      alert('保存失败: ' + (response.data.message || '未知错误'))
+    }
   } catch (e) {
-    alert('保存失败')
+    console.error(e)
+    alert('请求出错，无法保存模型')
+  } finally {
     savingModel.value = false
   }
 }
