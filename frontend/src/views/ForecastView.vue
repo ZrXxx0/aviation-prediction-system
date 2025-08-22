@@ -200,7 +200,7 @@
             <el-form-item label="组合时序模型">
               <el-radio-group v-model="trainForm.comboModel">
                 <el-radio label="">不使用</el-radio>
-                <el-radio label="sarima">SARIMA</el-radio>
+                <el-radio label="arima">ARIMA</el-radio>
                 <el-radio label="svr">SVR</el-radio>
               </el-radio-group>
             </el-form-item>
@@ -257,15 +257,15 @@
                   <el-divider content-position="left" style="margin:24px 0 24px 0;">ARIMA 参数</el-divider>
                   <el-col :span="4">
                     <div class="param-label">d</div>
-                    <el-input-number v-model="trainForm.hyperParams.sarima.d" :min="0" :max="3" controls-position="right" style="width:100%"/>
+                    <el-input-number v-model="trainForm.hyperParams.arima.d" :min="0" :max="3" controls-position="right" style="width:100%"/>
                   </el-col>
                   <el-col :span="4">
                     <div class="param-label">p</div>
-                    <el-input-number v-model="trainForm.hyperParams.sarima.p" :min="0" :max="10" controls-position="right" style="width:100%"/>
+                    <el-input-number v-model="trainForm.hyperParams.arima.p" :min="0" :max="10" controls-position="right" style="width:100%"/>
                   </el-col>
                   <el-col :span="4">
                     <div class="param-label">q</div>
-                    <el-input-number v-model="trainForm.hyperParams.sarima.q" :min="0" :max="10" controls-position="right" style="width:100%"/>
+                    <el-input-number v-model="trainForm.hyperParams.arima.q" :min="0" :max="10" controls-position="right" style="width:100%"/>
                   </el-col>
                   <el-col :span="4"></el-col>
                   <el-col :span="4"></el-col>
@@ -415,11 +415,10 @@
       <div v-if="trainingDialogLoading">模型训练中，请稍候...</div>
       <div v-else>
         <el-table :data="evaluationResults" style="margin: 24px 0;">
-          <el-table-column prop="date" label="日期" />
-          <el-table-column prop="model" label="模型" />
-          <el-table-column prop="mae" label="MAE" />
-          <el-table-column prop="mape" label="MAPE (%)" />
-          <el-table-column prop="rmse" label="RMSE" />
+          <el-table-column prop="test_mae" label="MAE" />
+          <el-table-column prop="test_MAPE" label="MAPE (%)" />
+          <el-table-column prop="test_RMSE" label="RMSE" />
+          <el-table-column prop="test_r2" label="R_Square" />
         </el-table>
         <div style="text-align:right;">
           <el-button type="primary" @click="saveModel" :loading="savingModel" style="margin-top:16px;">保存模型</el-button>
@@ -929,23 +928,22 @@ const trainForm = reactive({
   destinationCity: [],
   timeGranularity: '',
   selectedModel: 'XGBoost',
-  comboModel: '', // '', 'sarima', 'svr'
+  comboModel: '', // '', 'arima', 'svr'
   hyperParams: {
     xgboost: {
-      learningRate: 0.1,
-      maxDepth: 6,
+      n_estimators: 100,
+      learning_rate: 0.1,
+      max_depth: 3,
+      min_child_weight: 1,
       subsample: 0.8,
-      colsampleBytree: 0.8,
-      regAlpha: 0,
-      regLambda: 1
     },
     lightgbm: {
-      learningRate: 0.1,
-      numLeaves: 31,
-      featureFraction: 0.8,
-      baggingFraction: 0.8,
-      minDataInLeaf: 20,
-      lambdaL1: 0
+      n_estimators: 100,
+      learning_rate: 0.1,
+      max_depth: 7,
+      num_leaves: 31,
+      min_data_in_leaf: 20,
+      min_split_gain: 0
     },
     arima: {
       d: 1,
@@ -974,8 +972,8 @@ function showModelDetail(row) {
   } else if (row.model.includes('LightGBM')) {
     params = { ...trainForm.hyperParams.lightgbm }
   }
-  if (row.model.includes('SARIMA')) {
-    params = { ...params, ...trainForm.hyperParams.sarima }
+  if (row.model.includes('ARIMA')) {
+    params = { ...params, ...trainForm.hyperParams.arima }
   }
   if (row.model.includes('SVR')) {
     params = { ...params, ...trainForm.hyperParams.svr }
@@ -993,7 +991,7 @@ const showHistoryPrediction = computed(() => {
 watch(
   () => trainForm.originCity,
   (newVal) => {
-    if (!newVal?.length || newVal.length !== 2) {
+    if (!newVal?.length || newVal.length !== 3) {
       trainForm.destinationCity = []
       trainForm.timeGranularity = ''
       historyPredictions.value = []
@@ -1005,16 +1003,15 @@ watch(
 watch(
   () => trainForm.destinationCity,
   (newVal) => {
-    if (!newVal?.length || newVal.length !== 2) {
+    if (!newVal?.length || newVal.length !== 3) {
       trainForm.timeGranularity = ''
       historyPredictions.value = []
       return
     }
     if (
-      trainForm.originCity?.length === 2 &&
-      newVal.length === 2 &&
-      trainForm.originCity[0] === newVal[0] &&
-      trainForm.originCity[1] === newVal[1]
+      trainForm.originCity?.length === 3 &&
+      newVal.length === 3 &&
+      trainForm.originCity[2] === newVal[2]
     ) {
       trainForm.destinationCity = []
       alert('起点和终点城市不能相同！')
@@ -1040,7 +1037,6 @@ watch(
 )
 
 async function loadHistoryPredictions(origin, destination, granularity) {
-  // 中文 → 英文映射
   const granularityMap = {
     '年度': 'yearly',
     '季度': 'quarterly',
@@ -1097,20 +1093,66 @@ async function startTraining() {
   trainingDialogLoading.value = true
   evaluationResults.value = []
   try {
-    await new Promise(resolve => setTimeout(resolve, 2000))
-    let modelName = trainForm.selectedModel
-    if (trainForm.comboModel === 'sarima') {
-      modelName += '+SARIMA'
-    } else if (trainForm.comboModel === 'svr') {
-      modelName += '+SVR'
+    // 获取三字码（假设 originCity / destinationCity 是数组 [省,市,三字码]）
+    const originIATA = trainForm.originCity[2] || null
+    const destIATA = trainForm.destinationCity[2] || null
+
+    // 模型名称映射
+    let modelType = ''
+    if (trainForm.selectedModel == 'XGBoost'){
+      modelType = 'xgb'
+    } else if (trainForm.selectedModel == 'LightGBM') {
+      modelType = 'lgb'
+    } else {
+      throw new Error('未知的模型类型: ' + trainForm.selectedModel)
     }
-    evaluationResults.value = [{
-      date: new Date().toISOString().slice(0, 10),
-      model: modelName,
-      mae: (Math.random() * 10 + 10).toFixed(2),
-      mape: (Math.random() * 3 + 1).toFixed(2),
-      rmse: (Math.random() * 15 + 15).toFixed(2)
-    }]
+
+    const granularityMap = {
+      '年度': 'yearly',
+      '季度': 'quarterly',
+      '月度': 'monthly'
+    }
+    const granularityEn = granularityMap[trainForm.timeGranularity] || 'monthly'
+
+    // 组装 payload
+    const payload = {
+      origin: originIATA,
+      destination: destIATA,
+      config: {
+        time_granularity: granularityEn,
+        model_type: modelType,
+        test_size: 12,
+        add_ts_forecast: trainForm.comboModel === 'arima',  // 如果组合了 ARIMA，则启用
+        arima_order: [
+          trainForm.hyperParams.arima.p,
+          trainForm.hyperParams.arima.d,
+          trainForm.hyperParams.arima.q
+        ],
+        ...(modelType === 'xgb' ? { xgb_params: trainForm.hyperParams.xgboost } : {}),
+        ...(modelType === 'lgb' ? { lgb_params: trainForm.hyperParams.lightgbm } : {})
+      }
+    }
+
+    console.log("训练请求 payload:", payload)
+
+    // 发请求
+    const res = await fetch('http://localhost:8000/predict/pretrain/model/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+
+    if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`)
+    const result = await res.json()
+
+    if (!result.success) {
+      alert('训练失败: ' + (result.message || '未知错误'))
+      return
+    }
+    console.log('训练返回结果:', result)
+    // 假设后端返回 { success:true, results:[{date, model, mae, mape, rmse}, ...] }
+    evaluationResults.value = result.training_result ? [result.training_result] : []
+    console.log('评估结果:', evaluationResults.value)
   } catch (error) {
     alert('训练失败')
   } finally {
