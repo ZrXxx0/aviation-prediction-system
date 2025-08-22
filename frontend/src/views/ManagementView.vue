@@ -56,25 +56,27 @@
               <el-table-column prop="flights" label="航班数" min-width="100"/>
             </el-table>
 
-            <el-pagination
-              background
-              layout="prev, pager, next, sizes, total"
-              :page-sizes="[10, 20, 50, 100]"
-              :page-size="pagination.pageSize"
-              :current-page="pagination.currentPage"
-              :total="pagination.total"
-              @size-change="handleSizeChange"
-              @current-change="handleCurrentChange"
-              class="pagination"
-            />
+            <div class="toolbar">
+              <el-pagination
+                background
+                layout="prev, pager, next, sizes, total"
+                :page-sizes="[10, 20, 50, 100]"
+                :page-size="pagination.pageSize"
+                :current-page="pagination.currentPage"
+                :total="pagination.total"
+                @size-change="handleSizeChange"
+                @current-change="handleCurrentChange"
+                class="pagination"
+              />
 
-            <el-button
-              type="success"
-              @click="exportData"
-              class="export-btn"
-            >
-              导出查询结果
-            </el-button>
+              <el-button
+                type="success"
+                @click="exportData"
+                class="export-btn"
+              >
+                导出查询结果
+              </el-button>
+            </div>
           </div>
 
           <div v-else class="empty-data">
@@ -366,4 +368,20 @@ onMounted(() => { loadCityData() })
 .query-table .export-btn {
   margin-top: 20px; /* 按钮与分页栏间距增大 */
 }
+
+.toolbar {
+  display: flex;
+  justify-content: space-between; /* 两端对齐 */
+  align-items: center;            /* 垂直居中 */
+  margin-top: 16px;               /* 上边距，可按需调整 */
+}
+
+.pagination {
+  flex-shrink: 0; /* 避免被压缩 */
+}
+
+.export-btn {
+  flex-shrink: 0;
+}
+
 </style>
