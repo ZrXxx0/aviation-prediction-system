@@ -24,4 +24,5 @@ urlpatterns = [
     path('pretrain/model/', views.pretrain_model_request, name='pretrain_model_request'),
     path('formal/train/', views.formal_train_model, name='formal_train_model'),
     path('pretrain/models/', views.get_pretrain_models, name='get_pretrain_models'),
+    path('data/get_flightdata/', views.query_flight_market, name='query_flight_market'),
 ]

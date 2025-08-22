@@ -101,6 +101,19 @@ def predict_single_route(prediction_request):
         error_msg = f"加载模型文件失败: {str(e)}\n详细错误信息:\n{traceback.format_exc()}"
         raise Exception(error_msg)
 
+    # 可选：覆盖经济列尾部填充方式与增长率
+    econ_method = (prediction_request.get('economic_tail_method') or '').strip().lower()
+    if econ_method:
+        try:
+            preprocessor.economic_tail_method = econ_method
+        except Exception:
+            pass
+    if 'economic_growth_rate' in prediction_request:
+        try:
+            preprocessor.economic_growth_rate = float(prediction_request.get('economic_growth_rate'))
+        except Exception:
+            pass
+
     # 获取预测所需的信息
     feature_cols = metadata.get('feature_columns', [])
     target_col = metadata.get('target_column', 'Seats')
@@ -150,6 +163,10 @@ def predict_single_route(prediction_request):
 
         # 预测
         latest_input = current_data.iloc[[-1]][feature_cols]
+        # print(latest_input["O_GDP"])
+        # print(latest_input["D_GDP"])
+        # print(prediction_request.get('economic_tail_method'))
+        # print(prediction_request.get('economic_growth_rate'))
         next_pred = model.predict(latest_input)[0]
 
         # 更新数据
