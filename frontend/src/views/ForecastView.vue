@@ -42,7 +42,7 @@
                 <label>航线终点</label>
                 <el-cascader
                   v-model="selectedTo"
-                  :options="filteredDestinationOptions"
+                  :options="locationOptions"
                   :props="cascaderProps"
                   placeholder="请选择终点城市"
                   class="large-select"
@@ -56,7 +56,7 @@
                 <el-button type="success" class="run-btn" @click="runForecast">运行预测</el-button>
               </div>
 
-              <!-- 已选任务列表 -->
+              <!-- 已选预测任务 -->
               <div class="task-list" v-if="tasks.length">
                 <h3>已选预测任务</h3>
                 <div v-for="(task, index) in tasks" :key="index" class="task-item">
@@ -69,9 +69,21 @@
                         <div>层级校正</div>
                         <div>月度模型：{{ task.monthlyModel }}</div>
                         <div>季度模型：{{ task.quarterlyModel }}</div>
+                        <div v-if="task.economic_tail_method === 'linear'">
+                          经济指标预测：线性回归
+                        </div>
+                        <div v-else-if="task.economic_tail_method === 'growth_rate'">
+                          经济指标预测：增长率 {{ task.economic_growth_rate}}%
+                        </div>
                       </template>
                       <template v-else>
                         <div>模型：{{ task.modelType }}</div>
+                        <div v-if="task.economic_tail_method === 'linear'">
+                          经济指标预测：线性回归
+                        </div>
+                        <div v-else-if="task.economic_tail_method === 'growth_rate'">
+                          经济指标预测：增长率 {{ task.economic_growth_rate}}%
+                        </div>
                       </template>
                     </div>
                     <el-button size="mini" type="danger" @click="removeTask(index)">删除</el-button>
@@ -135,7 +147,7 @@
                 <el-col :span="12">
                   <el-cascader
                     v-model="trainForm.destinationCity"
-                    :options="filteredDestinationOptions"
+                    :options="locationOptions"
                     :props="cascaderProps"
                     clearable
                     placeholder="请选择终点城市"
@@ -199,12 +211,11 @@
                 <!-- XGBoost 参数 -->
                 <template v-if="trainForm.selectedModel === 'XGBoost'">
                   <el-col :span="4" v-for="(item, idx) in [
-                    {label:'学习率', model:'learningRate', min:0.01, max:1, step:0.01},
-                    {label:'最大深度', model:'maxDepth', min:1, max:20},
-                    {label:'子采样比例', model:'subsample', min:0.1, max:1, step:0.1},
-                    {label:'特征采样比例', model:'colsampleBytree', min:0.1, max:1, step:0.1},
-                    {label:'正则化参数', model:'regAlpha', min:0, step:0.1},
-                    {label:'L2正则化', model:'regLambda', min:0, step:0.1}
+                    {label:'提升树数量', model:'n_estimators', min:50, max:1000, step:5},
+                    {label:'学习率', model:'learning_rate', min:0.01, max:0.5, step:0.05},
+                    {label:'单棵树最大深度', model:'max_depth', min:2, max:20, step:1},
+                    {label:'样本权重约束', model:'min_child_weight', min:1, max:10, step:1},
+                    {label:'采样比例', model:'subsample', min:0.6, step:1},
                   ]" :key="idx">
                     <div class="param-label">{{ item.label }}</div>
                     <el-input-number
@@ -216,17 +227,18 @@
                       style="width:100%"
                     />
                   </el-col>
+                  <el-col :span="4"></el-col>
                 </template>
 
                 <!-- LightGBM 参数 -->
                 <template v-if="trainForm.selectedModel === 'LightGBM'">
                   <el-col :span="4" v-for="(item, idx) in [
-                    {label:'学习率', model:'learningRate', min:0.01, max:1, step:0.01},
-                    {label:'叶子数量', model:'numLeaves', min:10, max:500},
-                    {label:'特征采样比例', model:'featureFraction', min:0.1, max:1, step:0.1},
-                    {label:'数据采样比例', model:'baggingFraction', min:0.1, max:1, step:0.1},
-                    {label:'最小数据量', model:'minDataInLeaf', min:1, max:100},
-                    {label:'L1正则化', model:'lambdaL1', min:0, step:0.1}
+                    {label:'提升树数量', model:'n_estimators', min:5, max:1000, step:5},
+                    {label:'学习率', model:'learning_rate', min:0.01, max:0.5, step:0.05},
+                    {label:'单棵树最大深度', model:'max_depth', min:-1, max:20, step:1},
+                    {label:'叶子节点数', model:'num_leaves', min:5, max:300, step:10},
+                    {label:'叶子最小样本数', model:'min_data_in_leaf', min:5, max:100},
+                    {label:'最小分裂增益阈值', model:'min_split_gain', min:0, max:1}
                   ]" :key="idx">
                     <div class="param-label">{{ item.label }}</div>
                     <el-input-number
@@ -240,9 +252,9 @@
                   </el-col>
                 </template>
 
-                <!-- SARIMA 参数 -->
-                <template v-if="trainForm.comboModel === 'sarima'">
-                  <el-divider content-position="left" style="margin:24px 0 24px 0;">SARIMA 参数</el-divider>
+                <!-- ARIMA 参数 -->
+                <template v-if="trainForm.comboModel === 'arima'">
+                  <el-divider content-position="left" style="margin:24px 0 24px 0;">ARIMA 参数</el-divider>
                   <el-col :span="4">
                     <div class="param-label">d</div>
                     <el-input-number v-model="trainForm.hyperParams.sarima.d" :min="0" :max="3" controls-position="right" style="width:100%"/>
@@ -255,10 +267,7 @@
                     <div class="param-label">q</div>
                     <el-input-number v-model="trainForm.hyperParams.sarima.q" :min="0" :max="10" controls-position="right" style="width:100%"/>
                   </el-col>
-                  <el-col :span="4">
-                    <div class="param-label">季节性周期</div>
-                    <el-input-number v-model="trainForm.hyperParams.sarima.seasonal" :min="1" :max="52" controls-position="right" style="width:100%"/>
-                  </el-col>
+                  <el-col :span="4"></el-col>
                   <el-col :span="4"></el-col>
                   <el-col :span="4"></el-col>
                 </template>
@@ -312,6 +321,7 @@
       <el-checkbox v-model="hierarchicalMode" style="margin-bottom:16px;">
         层级预测校正（需分别选择月度和季度模型）
       </el-checkbox>
+      <!-- 层级预测校正或普通模型选择 -->
       <div v-if="hierarchicalMode">
         <div style="margin-bottom:12px;">
           <label style="font-weight:600;">月度模型</label>
@@ -376,6 +386,24 @@
           </el-option>
         </el-select>
       </div>
+      <!-- 经济数据预测方法 -->
+      <div style="margin-top:16px;">
+        <label style="font-weight:600;">经济数据预测方法</label>
+        <el-radio-group v-model="economic_tail_method" style="margin-top:8px;">
+          <el-radio label="linear">回归预测</el-radio>
+          <el-radio label="growth_rate">指定增长率</el-radio>
+        </el-radio-group>
+
+        <el-input-number
+          v-if="economic_tail_method === 'growth_rate'"
+          v-model="economic_growth_rate"
+          placeholder="请输入增长率(%)"
+          :min="0"
+          :max="100"
+          :step="0.1"
+          style="width:100%; margin-top:8px;"
+        />
+      </div>
       <div v-if="loadingModels" style="margin-top:6px; font-size:12px; color:#999;">加载模型中...</div>
       <template #footer>
         <el-button @click="showModelDialog = false">取消</el-button>
@@ -427,77 +455,61 @@ import axios from 'axios'
 import * as XLSX from 'xlsx'
 
 // 城市和省份数据结构
-const cityMap = ref({})
-
-// 省市级联选项
-const locationOptions = computed(() => [
-  ...Object.keys(cityMap.value).map(province => ({
-    label: province,
-    value: province,
-    children: (cityMap.value[province] || []).map(city => ({
-      label: city,
-      value: city
-    }))
-  }))
-])
+const locationOptions = ref([])
 const cascaderProps = {
   expandTrigger: 'hover',
   checkStrictly: false,
-  emitPath: false,
+  emitPath: true,      // 返回选中完整路径
   value: 'value',
   label: 'label',
-  children: 'children',
+  children: 'children'
 }
 
 // 加载城市数据
 async function loadCityData() {
   try {
-    const response = await fetch('/src/assets/城市经纬度.xlsx')
-    const arrayBuffer = await response.arrayBuffer()
-    const workbook = XLSX.read(arrayBuffer, { type: 'array' })
-    const sheet = workbook.Sheets[workbook.SheetNames[0]]
-    const data = XLSX.utils.sheet_to_json(sheet)
-    const cityMapTemp = {}
-    data.forEach((row) => {
-      const province = row['省份']
-      const city = row['城市']
-      if (!cityMapTemp[province]) cityMapTemp[province] = []
-      cityMapTemp[province].push(city)
+    const response = await fetch('/src/assets/iata_city_airport_mapping.json')
+    const data = await response.json()
+
+    const provinceMap = {}
+
+    // 遍历 JSON 构造省→市→机场三级结构
+    Object.entries(data).forEach(([iata, info]) => {
+      const { province, city, airport } = info
+
+      if (!provinceMap[province]) provinceMap[province] = {}
+      if (!provinceMap[province][city]) provinceMap[province][city] = []
+
+      provinceMap[province][city].push({
+        label: airport,   // 显示机场名
+        value: iata       // 传给后端 IATA 码
+      })
     })
-    cityMap.value = cityMapTemp
-    locationOptions.value = Object.keys(cityMapTemp).map(province => ({
+
+    // 转换成 Cascader 格式
+    locationOptions.value = Object.entries(provinceMap).map(([province, cities]) => ({
       label: province,
       value: province,
-      children: cityMapTemp[province].map(city => ({
+      children: Object.entries(cities).map(([city, airports]) => ({
         label: city,
-        value: city
+        value: city,
+        children: airports
       }))
     }))
+
   } catch (error) {
-    console.error('加载城市数据失败:', error)
-    alert('加载城市数据失败，请刷新页面重试')
+    console.error('加载机场数据失败:', error)
+    alert('加载机场数据失败，请刷新页面重试')
   }
 }
 
-const filteredDestinationOptions = computed(() => {
-  if (!trainForm.originCity?.length || trainForm.originCity.length !== 2) {
-    return locationOptions.value
-  }
-  const [originProvince, originCity] = trainForm.originCity
-  return locationOptions.value
-    .map(province => {
-      const filteredChildren = province.children.filter(city => 
-        !(province.value === originProvince && city.value === originCity)
-      )
-      return filteredChildren.length ? { ...province, children: filteredChildren } : null
-    })
-    .filter(Boolean)
-})
-
+// 预测相关
 const selectedFrom = ref('')
 const selectedTo = ref('')
 const timeRange = ref('月度')
 const numFeatures = ref(3)
+const economic_tail_method = ref('linear') // 默认回归预测
+const economic_growth_rate = ref(5)    // 指定增长率
 const modelType = ref('')
 const models = ref([])
 const loadingModels = ref(false)
@@ -519,30 +531,31 @@ let chartInstance = null
 
 // 获取模型列表（粒度可选）
 async function fetchModels(granularity) {
-  // granularity: 'monthly' | 'quarterly'
-  // 真实请求可用如下代码
-  // const url = api.getUrl(api.endpoints.PREDICT.FORECAST + 'models/')
-  // const res = await axios.get(url, {
-  //   params: {
-  //     origin_airport: selectedFrom.value,
-  //     destination_airport: selectedTo.value,
-  //     time_granularity: granularity
-  //   },
-  //   timeout: api.getTimeout()
-  // })
-  // if (res.data.success) return res.data.data.models
+  try {
+    // 三级 Cascader 中机场 IATA 码在数组的第 3 个位置
+    const originIATA = selectedFrom.value[2]
+    const destinationIATA = selectedTo.value[2]
 
-  // ==== 模拟返回数据 ====
-  if (granularity === 'monthly') {
-    return [
-      { model_id: "CAN_PEK_monthly_01", test_mae: 10000, test_rmse: 12000, test_mape: 0.03, test_r2: 0.98 },
-      { model_id: "CAN_PEK_monthly_02", test_mae: 11000, test_rmse: 13000, test_mape: 0.04, test_r2: 0.97 }
-    ]
-  } else {
-    return [
-      { model_id: "CAN_PEK_quarterly_01", test_mae: 9000, test_rmse: 11000, test_mape: 0.02, test_r2: 0.99 },
-      { model_id: "CAN_PEK_quarterly_02", test_mae: 9500, test_rmse: 11500, test_mape: 0.025, test_r2: 0.985 }
-    ]
+    // 接口 URL
+    const url = `http://localhost:8000/predict/forecast/models/`
+    const res = await axios.get(url, {
+      params: {
+        origin_airport: originIATA,
+        destination_airport: destinationIATA,
+        time_granularity: granularity
+      },
+      timeout: 10000 // 设置超时时间为 10 秒
+    })
+
+    if (res.data.success) {
+      return res.data.data.models
+    } else {
+      console.error('获取模型失败:', res.data)
+      return []
+    }
+  } catch (error) {
+    console.error('请求模型接口失败:', error)
+    return []
   }
 }
 
@@ -574,11 +587,11 @@ watch(hierarchicalMode, async (val) => {
 
 // 校验输入并弹窗
 async function openModelDialog() {
-  if (!selectedFrom.value || !selectedTo.value || !timeRange.value || !numFeatures.value) {
+  if (!selectedFrom.value[2] || !selectedTo.value[2] || !timeRange.value || !numFeatures.value) {
     alert('请完整配置起点、终点、时间粒度和时间长度')
     return
   }
-  if (selectedFrom.value === selectedTo.value) {
+  if (selectedFrom.value[2] === selectedTo.value[2]) {
     alert('起点和终点不能相同')
     return
   }
@@ -612,6 +625,8 @@ function confirmModel() {
     addTask(false)
   }
   showModelDialog.value = false
+  economic_tail_method.value = 'linear' // 重置经济数据预测方法
+  economic_growth_rate.value = 5 // 重置增长率
 }
 
 function addTask(isHierarchical) {
@@ -624,8 +639,8 @@ function addTask(isHierarchical) {
     return
   }
   if (!isConfigured.value) isConfigured.value = true
-  const fromCity = selectedFrom.value
-  const toCity = selectedTo.value
+  const fromCity = selectedFrom.value[2]
+  const toCity = selectedTo.value[2]
   // 判断是否完全重复
   let exists;
   if (isHierarchical) {
@@ -634,14 +649,18 @@ function addTask(isHierarchical) {
       r.to === toCity &&
       r.hierarchical &&
       r.monthlyModel === tempMonthlyModel.value &&
-      r.quarterlyModel === tempQuarterlyModel.value
+      r.quarterlyModel === tempQuarterlyModel.value &&
+      r.economic_tail_method === economic_tail_method.value &&
+      r.economic_growth_rate === (economic_tail_method.value === 'growth_rate' ? economic_growth_rate.value : null)
     )
   } else {
     exists = tasks.value.some(r =>
       r.from === fromCity &&
       r.to === toCity &&
       !r.hierarchical &&
-      r.modelType === modelType.value
+      r.modelType === modelType.value &&
+      r.economic_tail_method === economic_tail_method.value &&
+      r.economic_growth_rate === (economic_tail_method.value === 'growth_rate' ? economic_growth_rate.value : null)
     )
   }
   if (!exists) {
@@ -652,6 +671,8 @@ function addTask(isHierarchical) {
         hierarchical: true,
         monthlyModel: tempMonthlyModel.value,
         quarterlyModel: tempQuarterlyModel.value,
+        economic_tail_method: economic_tail_method.value,
+        economic_growth_rate: economic_tail_method.value === 'growth_rate' ? economic_growth_rate.value : null
       })
     } else {
       tasks.value.push({
@@ -659,6 +680,8 @@ function addTask(isHierarchical) {
         to: toCity,
         modelType: modelType.value,
         hierarchical: false,
+        economic_tail_method: economic_tail_method.value,
+        economic_growth_rate: economic_tail_method.value === 'growth_rate' ? economic_growth_rate.value : null
       })
     }
   }
@@ -723,87 +746,124 @@ async function runForecast() {
     alert('请先添加至少一条预测任务')
     return
   }
-
   try {
+    const payload = {
+      predictions: tasks.value.map(task => {
+        return {
+          hierarchy_reconcile: task.hierarchical,
+          origin_airport: task.from,   // 三字码
+          destination_airport: task.to,
+          time_granularity: timeRange.value === '年度' 
+            ? 'yearly' 
+            : timeRange.value === '季度' 
+              ? 'quarterly' 
+              : 'monthly',
+          prediction_periods: numFeatures.value, // 预测期数
+          economic_tail_method: task.economic_tail_method, // 'linear' 或 'growth_rate'
+          economic_growth_rate: task.economic_tail_method === 'growth_rate'
+            ? task.economic_growth_rate / 100 // 转成小数，例如 5% → 0.05
+            : null,
+          // 模型 ID，根据是否层级校正决定
+          ...(task.hierarchical
+            ? {
+                monthly_model_id: task.monthlyModel,
+                quarterly_model_id: task.quarterlyModel
+              }
+            : {
+                model_id: task.modelType
+              })
+        }
+      })
+    }
+    console.log('预测请求参数:', payload)
+    const url = 'http://localhost:8000/predict/forecast/run/'
+    const res = await axios.post(url, payload)
     // 真实请求（目前注释掉，前端直接使用静态数据）
     // const url = api.getUrl(api.endpoints.PREDICT.FORECAST + 'run/')
     // const res = await axios.post(url, { predictions: tasks.value }, { timeout: api.getTimeout() })
     
     // ==== 静态模拟返回数据 ====
-    const res = {
-      success: true,
-      data: [
-        {
-          model_info: {
-            origin_airport: "CAN",
-            destination_airport: "PEK",
-            model_id: "CAN_PEK_20250813233015",
-            model_type: "lgb",
-            train_mae: 33651.78,
-            train_rmse: 41485.83,
-            train_mape: 0.02,
-            train_r2: 1.0,
-            test_mae: 66841.01,
-            test_rmse: 67048.82,
-            test_mape: 0.05,
-            test_r2: -2.6
-          },
-          prediction_results: {
-            historical_data: [
-              { time_point: "2024-01", value: 7645 },
-              { time_point: "2024-02", value: 28280 },
-              { time_point: "2024-03", value: 8280 },
-              { time_point: "2024-04", value: 9280 },
-              { time_point: "2024-05", value: 23239 }
-            ],
-            future_predictions: [
-              { time_point: "2024-06", value: 23395 },
-              { time_point: "2024-07", value: 25165 },
-              { time_point: "2024-08", value: 7187 }
-            ]
-          }
-        },
-        {
-          model_info: {
-            origin_airport: "CAN",
-            destination_airport: "PVG",
-            model_id: "CAN_PVG_20250813233021",
-            model_type: "lgb",
-            train_mae: 2818.41,
-            train_rmse: 5937.08,
-            train_mape: 0.03,
-            train_r2: 0.99,
-            test_mae: 66757.35,
-            test_rmse: 73711.61,
-            test_mape: 0.29,
-            test_r2: -3.31
-          },
-          prediction_results: {
-            historical_data: [
-              { time_point: "2024-01", value: 14222 },
-              { time_point: "2024-02", value: 13837 },
-              { time_point: "2024-03", value: 14837 },
-              { time_point: "2024-04", value: 16837 },
-              { time_point: "2024-05", value: 14932 }
-            ],
-            future_predictions: [
-              { time_point: "2024-06", value: 8526 },
-              { time_point: "2024-07", value: 3518 },
-              { time_point: "2024-08", value: 9173 }
-            ]
-          }
-        }
-      ]
-    }
+    // const res = {
+    //   success: true,
+    //   data: [
+    //     {
+    //       model_info: {
+    //         origin_airport: "CAN",
+    //         destination_airport: "PEK",
+    //         model_id: "CAN_PEK_20250813233015",
+    //         model_type: "lgb",
+    //         train_mae: 33651.78,
+    //         train_rmse: 41485.83,
+    //         train_mape: 0.02,
+    //         train_r2: 1.0,
+    //         test_mae: 66841.01,
+    //         test_rmse: 67048.82,
+    //         test_mape: 0.05,
+    //         test_r2: -2.6
+    //       },
+    //       prediction_results: {
+    //         historical_data: [
+    //           { time_point: "2024-01", value: 7645 },
+    //           { time_point: "2024-02", value: 28280 },
+    //           { time_point: "2024-03", value: 8280 },
+    //           { time_point: "2024-04", value: 9280 },
+    //           { time_point: "2024-05", value: 23239 }
+    //         ],
+    //         future_predictions: [
+    //           { time_point: "2024-06", value: 23395 },
+    //           { time_point: "2024-07", value: 25165 },
+    //           { time_point: "2024-08", value: 7187 }
+    //         ]
+    //       }
+    //     },
+    //     {
+    //       model_info: {
+    //         origin_airport: "CAN",
+    //         destination_airport: "PVG",
+    //         model_id: "CAN_PVG_20250813233021",
+    //         model_type: "lgb",
+    //         train_mae: 2818.41,
+    //         train_rmse: 5937.08,
+    //         train_mape: 0.03,
+    //         train_r2: 0.99,
+    //         test_mae: 66757.35,
+    //         test_rmse: 73711.61,
+    //         test_mape: 0.29,
+    //         test_r2: -3.31
+    //       },
+    //       prediction_results: {
+    //         historical_data: [
+    //           { time_point: "2024-01", value: 14222 },
+    //           { time_point: "2024-02", value: 13837 },
+    //           { time_point: "2024-03", value: 14837 },
+    //           { time_point: "2024-04", value: 16837 },
+    //           { time_point: "2024-05", value: 14932 }
+    //         ],
+    //         future_predictions: [
+    //           { time_point: "2024-06", value: 8526 },
+    //           { time_point: "2024-07", value: 3518 },
+    //           { time_point: "2024-08", value: 9173 }
+    //         ]
+    //       }
+    //     }
+    //   ]
+    // }
+
+    console.log('预测返回结果:', res)
+
+    // 正确的取法：res.data.data 是数组
+    const results = res.data.data
 
     const allSeries = []
     let xLabels = []
     const performance = []
 
-    res.data.forEach(item => {
-      const { origin_airport, destination_airport, model_type, test_mae, test_rmse, test_mape, test_r2 } = item.model_info
-      const hist = item.prediction_results.historical_data.map(d => ({ ...d, type: 'train' }))
-      const pred = item.prediction_results.future_predictions.map(d => ({ ...d, type: 'predict' }))
+    results.forEach(item => {
+      // 注意这里要从 item.data 里取
+      const { model_info, prediction_results } = item.data || {}
+      const { origin_airport, destination_airport, model_type, test_mae, test_rmse, test_mape, test_r2 } = model_info
+      const hist = prediction_results.historical_data.map(d => ({ ...d, type: 'train' }))
+      const pred = prediction_results.future_predictions.map(d => ({ ...d, type: 'predict' }))
       const allData = [...hist, ...pred]
 
       const labels = allData.map(d => d.time_point)
@@ -858,7 +918,7 @@ watch(showTrain, async () => {
   }
 })
 
-// 新增模型训练tab相关变量和方法（与ManagementView一致）
+// 模型训练相关
 const activeTab = ref('forecast')
 const isTraining = ref(false)
 const evaluationResults = ref([])
@@ -887,11 +947,10 @@ const trainForm = reactive({
       minDataInLeaf: 20,
       lambdaL1: 0
     },
-    sarima: {
+    arima: {
       d: 1,
       p: 1,
       q: 1,
-      seasonal: 12
     },
     svr: {
       kernel: 'rbf',
@@ -926,8 +985,8 @@ function showModelDetail(row) {
 }
 
 const showHistoryPrediction = computed(() => {
-  return trainForm.originCity?.length === 2 && 
-         trainForm.destinationCity?.length === 2 && 
+  return trainForm.originCity?.length === 3 && 
+         trainForm.destinationCity?.length === 3 && 
          !!trainForm.timeGranularity
 })
 
@@ -971,8 +1030,8 @@ watch(
       historyPredictions.value = []
       return
     }
-    const origin = originArr
-    const destination = destinationArr
+    const origin = originArr[2]
+    const destination = destinationArr[2]
     if (origin && destination && granularity) {
       loadHistoryPredictions(origin, destination, granularity)
     }
@@ -981,37 +1040,36 @@ watch(
 )
 
 async function loadHistoryPredictions(origin, destination, granularity) {
+  // 中文 → 英文映射
+  const granularityMap = {
+    '年度': 'yearly',
+    '季度': 'quarterly',
+    '月度': 'monthly'
+  }
+  const granularityEn = granularityMap[granularity] || 'monthly'
   try {
-    historyPredictions.value = [
-      { 
-        date: '2024-01', 
-        model: `${origin}-${destination} XGBoost`, 
-        mae: (Math.random() * 5 + 15).toFixed(2), 
-        mape: (Math.random() * 1 + 1.5).toFixed(2), 
-        rmse: (Math.random() * 5 + 20).toFixed(2) 
+    const url = 'http://localhost:8000/predict/forecast/models/'
+    const res = await axios.get(url, {
+      params: {
+        origin_airport: origin,
+        destination_airport: destination,
+        time_granularity: granularityEn
       },
-      { 
-        date: '2024-01', 
-        model: `${origin}-${destination} LightGBM`, 
-        mae: (Math.random() * 5 + 15).toFixed(2), 
-        mape: (Math.random() * 1 + 1.5).toFixed(2), 
-        rmse: (Math.random() * 5 + 20).toFixed(2)
-      },
-      { 
-        date: '2024-01', 
-        model: `${origin}-${destination} XGBoost+SARIMA`, 
-        mae: (Math.random() * 5 + 10).toFixed(2), 
-        mape: (Math.random() * 0.8 + 1).toFixed(2), 
-        rmse: (Math.random() * 5 + 15).toFixed(2)
-      },
-      { 
-        date: '2024-01', 
-        model: `${origin}-${destination} LightGBM+SARIMA`, 
-        mae: (Math.random() * 5 + 10).toFixed(2), 
-        mape: (Math.random() * 0.8 + 1).toFixed(2), 
-        rmse: (Math.random() * 5 + 15).toFixed(2)
-      }
-    ]
+      timeout: 10000
+    })
+    console.log('历史预测结果:', res)
+    if (res.data?.success && res.data.data?.models && Array.isArray(res.data.data.models)) {
+      historyPredictions.value = res.data.data.models.map(item => ({
+        date: item.train_end_time,    // 使用训练结束时间
+        model: item.model_id,
+        mae: item.test_mae,
+        mape: item.test_mape,
+        rmse: item.test_rmse
+      }))
+    } else {
+      console.warn('格式异常', res)
+      historyPredictions.value = []
+    }
   } catch (error) {
     console.error('加载历史预测结果失败:', error)
     historyPredictions.value = []

@@ -179,6 +179,43 @@ const filteredDestinationOptions = computed(() => {
   }))
 })
 
+// 加载机场数据
+async function loadAirportData() {
+  try {
+    const response = await fetch('/src/assets/iata_city_airport_mapping.json')
+    const data = await response.json()
+
+    const provinceMap = {}
+
+    // 遍历 JSON 构造层级结构
+    Object.entries(data).forEach(([iata, info]) => {
+      const { province, city, airport } = info
+
+      if (!provinceMap[province]) provinceMap[province] = {}
+      if (!provinceMap[province][city]) provinceMap[province][city] = []
+
+      provinceMap[province][city].push({
+        label: airport,   // 前端显示机场名称
+        value: iata       // 最终传给后端的三字码
+      })
+    })
+
+    // 转换成 Cascader 所需格式
+    locationOptions.value = Object.entries(provinceMap).map(([province, cities]) => ({
+      label: province,
+      value: province,
+      children: Object.entries(cities).map(([city, airports]) => ({
+        label: city,
+        value: city,
+        children: airports
+      }))
+    }))
+  } catch (error) {
+    console.error('加载机场数据失败:', error)
+    alert('加载机场数据失败，请刷新页面重试')
+  }
+}
+
 // 查询
 async function searchData() {
   try {
@@ -300,43 +337,6 @@ function parseCSVPreview(csvText) {
     return obj
   })
   previewData.value = rows.filter(r => Object.values(r).some(v => v))
-}
-
-// 加载机场数据
-async function loadAirportData() {
-  try {
-    const response = await fetch('/src/assets/iata_city_airport_mapping.json')
-    const data = await response.json()
-
-    const provinceMap = {}
-
-    // 遍历 JSON 构造层级结构
-    Object.entries(data).forEach(([iata, info]) => {
-      const { province, city, airport } = info
-
-      if (!provinceMap[province]) provinceMap[province] = {}
-      if (!provinceMap[province][city]) provinceMap[province][city] = []
-
-      provinceMap[province][city].push({
-        label: airport,   // 前端显示机场名称
-        value: iata       // 最终传给后端的三字码
-      })
-    })
-
-    // 转换成 Cascader 所需格式
-    locationOptions.value = Object.entries(provinceMap).map(([province, cities]) => ({
-      label: province,
-      value: province,
-      children: Object.entries(cities).map(([city, airports]) => ({
-        label: city,
-        value: city,
-        children: airports
-      }))
-    }))
-  } catch (error) {
-    console.error('加载机场数据失败:', error)
-    alert('加载机场数据失败，请刷新页面重试')
-  }
 }
 
 onMounted(() => { loadAirportData() })

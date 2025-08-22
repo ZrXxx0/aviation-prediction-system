@@ -17,7 +17,7 @@ const routes = [
     {
         path: '/forecast',
         name: 'Forecast',
-        component: ForecastManager
+        component: ForecastView
     },
     {
         path: '/management',
