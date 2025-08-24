@@ -187,7 +187,7 @@ def predict_single_route(prediction_request):
         'origin_airport': model_info.origin_airport,
         'destination_airport': model_info.destination_airport,
         'time_granularity': model_info.time_granularity,
-        'model_type': metadata.get('model_type', 'LightGBM'),
+        'model_type': f"{metadata.get('model_type')}+ARIMA" if metadata.get('add_ts_forecast', False) else metadata.get('model_type'),
         'feature_count': len(feature_cols),
         'training_samples': metadata.get('training_samples', len(latest_data)),
         'test_samples': metadata.get('test_samples', 0),
