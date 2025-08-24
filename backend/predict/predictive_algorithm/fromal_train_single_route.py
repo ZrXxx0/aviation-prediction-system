@@ -21,32 +21,19 @@ plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
 
 
-def formal_train_single_route(origin, destination, time_granularity, model_type, pretrained_metadata_path):
+def formal_train_single_route(origin, destination, time_granularity, pretrained_metadata_path):
     """
     正式训练单条航线的完整流程，使用预训练模型的元数据参数
 
     :param origin: 起始机场代码 (如 'CAN')
     :param destination: 目标机场代码 (如 'PEK')
     :param time_granularity: 时间粒度
-    :param model_type: 模型类型
     :param pretrained_metadata_path: 预训练模型元数据文件路径
     :return: 训练状态 (成功/失败) 和结果信息
     """
     current_dir = os.path.dirname(os.path.abspath(__file__))  # backend/predict/predictive_algorithm/
     model_dir = os.path.join(os.path.dirname(os.path.dirname(current_dir)), 'AirlineModels')  # backend/AirlineModels
     EXISTING_MODEL_DIR = os.path.join(model_dir, 'Existing_Models')
-
-    # 创建时间粒度和模型类型的子目录
-    granularity_model_dir = os.path.join(EXISTING_MODEL_DIR, f"{time_granularity}_{model_type}")
-    os.makedirs(granularity_model_dir, exist_ok=True)
-
-    # 生成时间戳（精确到秒）
-    timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-
-    # 创建最终的航线目录
-    route_dir = os.path.join(granularity_model_dir, f"{origin}_{destination}_{timestamp}")
-    full_model_id = f"{origin}_{destination}_{timestamp}"
-    os.makedirs(route_dir, exist_ok=True)
 
     # 预训练的元数据地址
     PRE_TRAINED_MODEL_DIR = os.path.join(model_dir, 'Pre_trained_Models')
@@ -64,7 +51,19 @@ def formal_train_single_route(origin, destination, time_granularity, model_type,
         
         # print("预训练模型元数据加载成功")
         # print(f"元数据内容: {json.dumps(pretrained_metadata, ensure_ascii=False, indent=2)}")
-        
+        model_type = pretrained_metadata["model_type"]
+        # 创建时间粒度和模型类型的子目录
+        granularity_model_dir = os.path.join(EXISTING_MODEL_DIR, f"{time_granularity}_{model_type}")
+        os.makedirs(granularity_model_dir, exist_ok=True)
+
+        # 生成时间戳（精确到秒）
+        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+
+        # 创建最终的航线目录
+        route_dir = os.path.join(granularity_model_dir, f"{origin}_{destination}_{timestamp}")
+        full_model_id = f"{origin}_{destination}_{timestamp}"
+        os.makedirs(route_dir, exist_ok=True)
+
         # 从元数据中提取关键参数
         # 1. 提取ARIMA order参数
         arima_order = pretrained_metadata.get("arima_order", (1, 1, 1))

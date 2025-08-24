@@ -751,9 +751,6 @@ def formal_train_model(request):
             'test_r2': pretrain_record.test_r2,
         }
         
-        # 设置模型类型（这里假设为lgb，可以根据需要调整）
-        model_type = 'lgb'
-        
         print(f"开始正式训练模型: {origin}-{destination}, 时间粒度: {time_granularity}")
         # print(f"使用预训练元数据: {meta_file_path}")
         
@@ -761,7 +758,6 @@ def formal_train_model(request):
             origin=origin,
             destination=destination,
             time_granularity=time_granularity,
-            model_type=model_type,
             pretrained_metadata_path=meta_file_path
         )
         
