@@ -585,6 +585,7 @@ const loadingModels = ref(false)
 const showTrain = ref(false)
 const isConfigured = ref(false)
 const tasks = ref([])
+const forecastResults = ref([])  // 保存完整的预测结果
 const performanceTable = ref([])
 
 const showModelDialog = ref(false)
@@ -819,103 +820,102 @@ async function runForecast() {
   try {
     showProcessing.value = true
     const payload = {
-      predictions: tasks.value.map(task => {
-        return {
-          hierarchy_reconcile: task.hierarchical,
-          origin_airport: task.from,   // 三字码
-          destination_airport: task.to,
-          time_granularity: timeRange.value === '年度' 
-            ? 'yearly' 
-            : timeRange.value === '季度' 
-              ? 'quarterly' 
-              : 'monthly',
-          prediction_periods: numFeatures.value, // 预测期数
-          economic_tail_method: task.economic_tail_method, // 'linear' 或 'growth_rate'
-          economic_growth_rate: task.economic_tail_method === 'growth_rate'
-            ? task.economic_growth_rate / 100 // 转成小数，例如 5% → 0.05
-            : null,
-          // 模型 ID，根据是否层级校正决定
-          ...(task.hierarchical
-            ? {
-                monthly_model_id: task.monthlyModel,
-                quarterly_model_id: task.quarterlyModel
-              }
-            : {
-                model_id: task.modelType
-              })
-        }
-      })
+      predictions: tasks.value.map(task => ({
+        hierarchy_reconcile: task.hierarchical,
+        origin_airport: task.from,
+        destination_airport: task.to,
+        time_granularity: timeRange.value === '年度' 
+          ? 'yearly' 
+          : timeRange.value === '季度' 
+            ? 'quarterly' 
+            : 'monthly',
+        prediction_periods: numFeatures.value,
+        economic_tail_method: task.economic_tail_method,
+        economic_growth_rate: task.economic_tail_method === 'growth_rate'
+          ? task.economic_growth_rate / 100
+          : null,
+        ...(task.hierarchical
+          ? {
+              monthly_model_id: task.monthlyModel,
+              quarterly_model_id: task.quarterlyModel
+            }
+          : {
+              model_id: task.modelType
+            })
+      }))
     }
+
     console.log('预测请求参数:', payload)
     const url = 'http://localhost:8000/predict/forecast/run/'
-    const res = await axios.post(url, payload)
+    const res = await axios.post(url, payload) 
     console.log('预测返回结果:', res)
 
-    // 正确的取法：res.data.data 是数组
-    const results = res.data.data
-
-    const allSeries = []
-    let xLabels = []
-    const performance = []
-
-    results.forEach(item => {
-      // 注意这里要从 item.data 里取
-      const { model_info, prediction_results } = item.data || {}
-      const { origin_airport, destination_airport, model_type, test_mae, test_rmse, test_mape, test_r2 } = model_info
-      const hist = prediction_results.historical_data.map(d => ({ ...d, type: 'train' }))
-      const pred = prediction_results.future_predictions.map(d => ({ ...d, type: 'predict' }))
-      const allData = [...hist, ...pred]
-
-      const labels = allData.map(d => d.time_point)
-      xLabels = showTrain.value ? labels : pred.map(d => d.time_point)
-
-      if (showTrain.value) {
-        allSeries.push({
-          name: `${origin_airport}→${destination_airport} (${model_type})`,
-          type: 'line',
-          smooth: true,
-          data: [...hist.map(d => d.value), ...Array(pred.length).fill(null)],
-          lineStyle: { type: 'solid' }
-        })
-        allSeries.push({
-          name: `${origin_airport}→${destination_airport} (${model_type})`,
-          type: 'line',
-          smooth: true,
-          data: [...Array(hist.length).fill(null), ...pred.map(d => d.value)],
-          lineStyle: { type: 'dashed' }
-        })
-      } else {
-        allSeries.push({
-          name: `${origin_airport}→${destination_airport} (${model_type})`,
-          type: 'line',
-          smooth: true,
-          data: pred.map(d => d.value),
-          lineStyle: { type: 'solid' }
-        })
-      }
-
-      performance.push({
-        route: `${origin_airport} → ${destination_airport}`,
-        model: model_type,
-        mae: test_mae,
-        rmse: test_rmse,
-        mape: test_mape,
-        r2: test_r2
-      })
-    })
-
-    renderChart(xLabels, allSeries)
-    performanceTable.value = performance
-    showProcessing.value = false // 请求完成后关闭
-    
+    forecastResults.value = res.data.data  // 保存完整结果
+    renderFromResults()  // 根据 showTrain.value 渲染
+    showProcessing.value = false
   } catch (err) {
     console.error('预测失败:', err)
   }
 }
 
+// 渲染逻辑提取出来
+function renderFromResults() {
+  const allSeries = []
+  let xLabels = []
+  const performance = []
+
+  forecastResults.value.forEach(item => {
+    const { model_info, prediction_results } = item.data || {}
+    const { origin_airport, destination_airport, model_type, test_mae, test_rmse, test_mape, test_r2 } = model_info
+    const hist = prediction_results.historical_data.map(d => ({ ...d, type: 'train' }))
+    const pred = prediction_results.future_predictions.map(d => ({ ...d, type: 'predict' }))
+    const allData = [...hist, ...pred]
+
+    const labels = allData.map(d => d.time_point)
+    xLabels = showTrain.value ? labels : pred.map(d => d.time_point)
+
+    if (showTrain.value) {
+      allSeries.push({
+        name: `${origin_airport}→${destination_airport} (${model_type})`,
+        type: 'line',
+        smooth: true,
+        data: [...hist.map(d => d.value), ...Array(pred.length).fill(null)],
+        lineStyle: { type: 'solid' }
+      })
+      allSeries.push({
+        name: `${origin_airport}→${destination_airport} (${model_type})`,
+        type: 'line',
+        smooth: true,
+        data: [...Array(hist.length).fill(null), ...pred.map(d => d.value)],
+        lineStyle: { type: 'dashed' }
+      })
+    } else {
+      allSeries.push({
+        name: `${origin_airport}→${destination_airport} (${model_type})`,
+        type: 'line',
+        smooth: true,
+        data: pred.map(d => d.value),
+        lineStyle: { type: 'solid' }
+      })
+    }
+
+    performance.push({
+      route: `${origin_airport} → ${destination_airport}`,
+      model: model_type,
+      mae: test_mae,
+      rmse: test_rmse,
+      mape: test_mape,
+      r2: test_r2
+    })
+  })
+
+  renderChart(xLabels, allSeries)
+  performanceTable.value = performance
+}
+
 watch(showTrain, async () => {
   if (performanceTable.value.length) {
-    runForecast()
+    renderFromResults()
   }
 })
 
