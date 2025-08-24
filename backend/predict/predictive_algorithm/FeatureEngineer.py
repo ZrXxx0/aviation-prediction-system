@@ -593,7 +593,8 @@ class AirlineRouteModel:
                        'Equipment_Total_Flights', 'Equipment_Total_Seats', 'Route_Total_Flight_Time', 'Region',
                        'Route_Total_Flights', 'Con Total Est. Pax', 'First', 'Business',
                        'Premium', 'Full Y', 'Disc Y', 'Total Est. Pax', 'Local Est. Pax',
-                       'Behind Est. Pax', 'Bridge Est. Pax', 'Beyond Est. Pax']
+                       'Behind Est. Pax', 'Bridge Est. Pax', 'Beyond Est. Pax',
+                        'id', 'created_at', 'updated_at']
         
         route_data = (route_data.drop(columns=cols_to_drop, errors='ignore')
                                 .drop_duplicates()

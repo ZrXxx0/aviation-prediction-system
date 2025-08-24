@@ -6,6 +6,9 @@
 
 # 数据库字段名 -> CSV列名映射
 FIELD_TO_CSV_MAPPING = {
+    'id':'id',
+    'created_at':'created_at',
+    'updated_at':'updated_at',
     'year_month': 'YearMonth',
     'origin': 'Origin',
     'destination': 'Destination',
