@@ -3,7 +3,7 @@
     <div class="dashboard">
       <!-- 左侧面板 - 地图和筛选 -->
       <div class="left-panel">
-        <div class="panel-title">
+        <div class="panel-title" style="margin-top: -15px">
           <Decoration1 :color="['#46bee9', '#46bee9']" style="width:200px;height:50px;" />
           <h2>全国航线实时分布</h2>
         </div>
@@ -18,8 +18,26 @@
                 placeholder="选择年月"
                 format="YYYY 年 MM 月"
                 value-format="YYYY-MM"
-                style="width: 40%"
+                style="width: 60%"
             ></el-date-picker>
+          </div>
+
+          <div class="filter-group">
+            <label for="selectedCity"><i class="fas fa-map-marker-alt"></i> 城市筛选</label>
+            <el-cascader
+              id="MapSelectedCity"
+              v-model="selectedMapSelectedCity"
+              :options="locationOptions"
+              :props="props"
+              clearable
+              collapse-tags
+              collapse-tags-tooltip
+              :show-all-levels="false"
+              @change="handleMapSelectedCityChange"
+              style="width: 60%"
+              :max-collapse-tags="1"
+              :max-collapse-tags-length="8"
+            ></el-cascader>
           </div>
 
           <div class="filter-group">
@@ -30,7 +48,7 @@
               :options="locationOptions"
               :props="cascaderProps"
               clearable
-              style="width: 40%"
+              style="width: 60%"
             ></el-cascader>
           </div>
 
@@ -42,7 +60,7 @@
                 :options="locationOptions"
                 :props="cascaderProps"
                 clearable
-                style="width: 40%"
+                style="width: 60%"
             ></el-cascader>
           </div>
 
@@ -67,7 +85,7 @@
                 :options="locationOptions"
                 :props="cascaderProps"
                 clearable
-                style="width: 40%"
+                style="width: 50%"
             ></el-cascader>
           </div>
 
@@ -79,7 +97,7 @@
                 :options="locationOptions"
                 :props="cascaderProps"
                 clearable
-                style="width: 40%; margin-right: 20px"
+                style="width: 50%; margin-right: 20px"
             ></el-cascader>
             <el-button type="primary" :icon="Search" circle @click="handleSearch" />
           </div>
@@ -89,12 +107,12 @@
           <div class="stat-card">
             <h3>🛫 总运力</h3>
             <div class="value">{{ filteredStats.capacity.toLocaleString() }}</div>
-            <div class="unit">人次/月</div>
+            <div class="unit">万 人次/月</div>
           </div>
           <div class="stat-card">
             <h3>🛩️ 总运量</h3>
             <div class="value">{{ filteredStats.volume.toLocaleString() }}</div>
-            <div class="unit">人次/月</div>
+            <div class="unit">万 人次/月</div>
           </div>
           <div class="stat-card">
             <h3>🛫 航班数量</h3>
@@ -103,17 +121,31 @@
           </div>
         </div>
 
+        <div class="rose-chart-container">
+          <!-- 玫瑰图并排两个，展示机型和机队数据 -->
+          <div class="rose-charts-wrapper">
+            <div class="rose-chart-item">
+<!--              <div class="rose-chart-title">机型分布</div>-->
+              <div ref="aircraftTypeChartRef" id="aircraft-type-chart" style="width:100%;height:280px;"></div>
+            </div>
+            <div class="rose-chart-item">
+<!--              <div class="rose-chart-title">机队分布</div>-->
+              <div ref="fleetChartRef" id="fleet-chart" style="width:100%;height:280px;"></div>
+            </div>
+          </div>
+        </div>
+
         <div class="bar-chart-container">
           <div class="bar-chart-header">
-            <div class="chart-title">航班统计指标趋势(过去12个月)</div>
-            <el-select v-model="selectedStatType" placeholder="选择统计类型" style="width: 180px;margin-top: 15px">
-              <el-option
-                  v-for="item in statTypeOptions"
-                  :key="item.value"
-                  :label="item.label"
-                  :value="item.value"
-              />
-            </el-select>
+            <div class="chart-title">航班统计指标趋势</div>
+            <div style=" text-align: center;">
+              <label style="margin-left: 5px; color: #7cb9e8;">时间周期：</label>
+              <el-input-number v-model="month_number" :min="3" :max="24" @change="handleTimePeriodChange" >
+                <template #suffix>
+                  <span>月</span>
+                </template>
+              </el-input-number>
+            </div>
           </div>
           <div ref="cubeChartRef" id="cube-bar-chart" style="width:100%;height:320px;min-height:200px"></div>
         </div>
@@ -133,13 +165,14 @@ import * as XLSX from 'xlsx';
 import apiConfig from '@/config/api.js';
 
 echarts.registerMap('china', chinaMap as any);
-
+const month_number = ref(12) // 默认12个月，与timePeriod保持一致
 const selectedDate = ref('2024-05'); // 默认2024年5月
+const selectedMapSelectedCity = ref([['']] as any[]); // 城市筛选，默认全国
 const selectedMapCity = ref([''] as string[]); // 地图查看起点城市
 const selectedMapToCity = ref([''] as string[]); // 地图查看终点城市
 const selectedStartCity = ref([''] as string[]); // 起始城市
 const selectedEndCity = ref([''] as string[]); // 终点城市
-const selectedStatType = ref('capacity');
+const timePeriod = ref(12); // 时间周期，默认12个月
 const cityMap = ref<Record<string, string[]>>({});
 const geoCoordMap = ref<Record<string, [number, number]>>({});
 
@@ -160,6 +193,12 @@ const filteredTrendData = reactive({
   capacity: [],
   volume: [],
   flights: []
+});
+
+// 机型和机队数据
+const aircraftData = reactive({
+  aircraftTypes: [],
+  fleetData: []
 });
 
 // 获取航线分布数据
@@ -255,6 +294,69 @@ const fetchRouteDistributionWithCities = async (yearMonth: string, originCity: s
   }
 };
 
+// 使用新的后端API获取航线分布数据（支持复杂的城市筛选逻辑）
+const fetchRouteDistributionAdvanced = async (yearMonth: string, selectedCities: string[], originCity: string, destCity: string) => {
+  try {
+    console.log('🔍 使用高级API获取航线分布数据:', { yearMonth, selectedCities, originCity, destCity });
+    
+    const params = new URLSearchParams({ 
+      year_month: yearMonth
+    });
+    
+    // 添加城市筛选参数
+    if (selectedCities && selectedCities.length > 0) {
+      // 过滤掉空字符串（全国）
+      const validCities = selectedCities.filter(city => city !== '' && city !== '全国');
+      if (validCities.length > 0) {
+        params.append('selected_cities', validCities.join(','));
+      }
+    }
+    
+    // 添加起点城市参数
+    if (originCity && originCity !== '全国') {
+      params.append('origin_city', originCity);
+    }
+    
+    // 添加终点城市参数
+    if (destCity && destCity !== '全国') {
+      params.append('dest_city', destCity);
+    }
+    
+    const url = apiConfig.getUrl(apiConfig.endpoints.SHOW.ROUTE_DISTRIBUTION_ADVANCED) + `?${params}`;
+    console.log('🔍 请求URL:', url);
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    
+    // 保存完整的后端数据
+    routeData.value = data;
+    
+    // 转换数据格式为前端地图需要的格式
+    const convertedData = data.map((item: any) => [
+      { name: item.from },
+      { name: item.to, value: item.flights }
+    ]);
+    
+    convertedRouteData.value = convertedData;
+    console.log('✅ 成功获取高级航线分布数据:', routeData.value.length, '条记录');
+  } catch (error) {
+    console.error('❌ 获取高级航线分布数据失败:', error);
+    // 如果API失败，使用默认数据
+    routeData.value = defaultRouteData;
+    
+    const convertedData = defaultRouteData.map((item: any) => [
+      { name: item.from },
+      { name: item.to, value: item.flights }
+    ]);
+    
+    convertedRouteData.value = convertedData;
+    console.log('📊 使用默认航线数据:', convertedRouteData.value.length, '条记录');
+  }
+};
+
 // API调用函数
 const fetchStatisticsSummary = async (yearMonth: string, startCity?: string, endCity?: string) => {
   try {
@@ -274,10 +376,10 @@ const fetchStatisticsSummary = async (yearMonth: string, startCity?: string, end
     console.log('✅ 成功获取统计数据:', filteredStats);
   } catch (error) {
     console.error('❌ 获取统计数据失败:', error);
-    // 设置默认统计数据
-    filteredStats.capacity = 1500000;
-    filteredStats.volume = 1200000;
-    filteredStats.flights = 15000;
+    // 设置默认统计数据（万人次）
+    filteredStats.capacity = 150;  // 150万人次
+    filteredStats.volume = 120;    // 120万人次
+    filteredStats.flights = 15000; // 航班数量保持原单位
     console.log('📊 使用默认统计数据:', filteredStats);
   }
 };
@@ -287,6 +389,8 @@ const fetchStatisticsTrend = async (yearMonth: string, startCity?: string, endCi
     const params = new URLSearchParams({ year_month: yearMonth });
     if (startCity) params.append('start_city', startCity);
     if (endCity) params.append('end_city', endCity);
+    // 添加时间周期参数，如果API支持的话
+    params.append('months', timePeriod.value.toString());
     
     const response = await fetch(apiConfig.getUrl(apiConfig.endpoints.SHOW.STATISTICS_TREND) + `?${params}`);
     if (!response.ok) {
@@ -294,20 +398,72 @@ const fetchStatisticsTrend = async (yearMonth: string, startCity?: string, endCi
     }
     const data = await response.json();
     
-    filteredTrendData.months = data.months || [];
-    filteredTrendData.capacity = data.capacity || [];
-    filteredTrendData.volume = data.volume || [];
-    filteredTrendData.flights = data.flights || [];
+    // 如果后端返回的数据长度与当前时间周期不匹配，则截取或补充
+    const months = data.months || [];
+    const capacity = data.capacity || [];
+    const volume = data.volume || [];
+    const flights = data.flights || [];
+    
+    // 确保数据长度与时间周期一致
+    const targetLength = timePeriod.value;
+    filteredTrendData.months = months.length >= targetLength ? months.slice(-targetLength) : getLastNMonths(targetLength);
+    filteredTrendData.capacity = capacity.length >= targetLength ? capacity.slice(-targetLength) : generateRandomData(150, targetLength);  // 150万人次
+    filteredTrendData.volume = volume.length >= targetLength ? volume.slice(-targetLength) : generateRandomData(120, targetLength);      // 120万人次
+    filteredTrendData.flights = flights.length >= targetLength ? flights.slice(-targetLength) : generateRandomData(200, targetLength);   // 航班数量
+    
     console.log('✅ 成功获取趋势数据:', filteredTrendData);
   } catch (error) {
     console.error('❌ 获取趋势数据失败:', error);
-    // 设置默认趋势数据
-    const months = getLast12Months();
+    // 设置默认趋势数据（万人次）
+    const months = getLastNMonths(timePeriod.value);
     filteredTrendData.months = months;
-    filteredTrendData.capacity = generateRandomData(1500);
-    filteredTrendData.volume = generateRandomData(1200);
-    filteredTrendData.flights = generateRandomData(200);
+    filteredTrendData.capacity = generateRandomData(150, timePeriod.value);  // 150万人次
+    filteredTrendData.volume = generateRandomData(120, timePeriod.value);    // 120万人次
+    filteredTrendData.flights = generateRandomData(200, timePeriod.value);   // 航班数量
     console.log('📊 使用默认趋势数据:', filteredTrendData);
+  }
+};
+
+// 获取机型和机队数据
+const fetchAircraftData = async (yearMonth: string, startCity?: string, endCity?: string) => {
+  try {
+    const params = new URLSearchParams({ year_month: yearMonth });
+    if (startCity) params.append('start_city', startCity);
+    if (endCity) params.append('end_city', endCity);
+    
+    const response = await fetch(apiConfig.getUrl(apiConfig.endpoints.SHOW.AIRCRAFT_DATA) + `?${params}`);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+    const data = await response.json();
+    
+    aircraftData.aircraftTypes = data.aircraft_types || [];
+    aircraftData.fleetData = data.fleet_data || [];
+    console.log('✅ 成功获取机型和机队数据:', aircraftData);
+  } catch (error) {
+    console.error('❌ 获取机型和机队数据失败:', error);
+    // 设置默认机型和机队数据
+    aircraftData.aircraftTypes = [
+      { value: 35, name: 'B737' },
+      { value: 28, name: 'A320' },
+      { value: 22, name: 'B787' },
+      { value: 18, name: 'A330' },
+      { value: 15, name: 'B777' },
+      { value: 12, name: 'A350' },
+      { value: 10, name: 'B747' },
+      { value: 8, name: 'A380' }
+    ];
+    aircraftData.fleetData = [
+      { value: 42, name: '中国国航' },
+      { value: 38, name: '东方航空' },
+      { value: 35, name: '南方航空' },
+      { value: 28, name: '海南航空' },
+      { value: 25, name: '深圳航空' },
+      { value: 22, name: '厦门航空' },
+      { value: 18, name: '四川航空' },
+      { value: 15, name: '春秋航空' }
+    ];
+    console.log('📊 使用默认机型和机队数据:', aircraftData);
   }
 };
 
@@ -661,6 +817,57 @@ const cascaderProps: CascaderProps = {
   children: 'children',
 };
 
+const props = { multiple: true }
+
+// 处理城市筛选的变化
+function handleMapSelectedCityChange(val: any[]) {
+  console.log('原始选择值:', val);
+  
+  if (!val || val.length === 0) {
+    // 如果没有选择任何城市，默认设置为全国
+    selectedMapSelectedCity.value = [['']];
+    return;
+  }
+  
+  // 提取所有选中的城市名称（取每个路径的最后一个元素）
+  const selectedCities = val.map(path => {
+    if (Array.isArray(path)) {
+      return path[path.length - 1]; // 取路径的最后一个元素
+    }
+    return path;
+  });
+  
+  console.log('提取的城市名称:', selectedCities);
+  
+  // 检查是否包含"全国"（空字符串）
+  const hasNational = selectedCities.includes('');
+  // 检查是否包含其他城市
+  const hasOtherCities = selectedCities.some(city => city !== '');
+  
+  if (hasOtherCities && hasNational) {
+    // 如果选择了其他城市，自动去掉"全国"
+    const filteredPaths = val.filter(path => {
+      const city = Array.isArray(path) ? path[path.length - 1] : path;
+      return city !== '';
+    });
+    selectedMapSelectedCity.value = filteredPaths;
+    console.log('去掉全国后的选择:', filteredPaths);
+  } else if (!hasOtherCities && !hasNational) {
+    // 如果没有选择任何城市，默认设置为全国
+    selectedMapSelectedCity.value = [['']];
+    console.log('设置为全国');
+  } else {
+    // 其他情况保持原样
+    selectedMapSelectedCity.value = val;
+    console.log('保持原样');
+  }
+  
+  console.log('最终城市筛选变化:', selectedMapSelectedCity.value);
+  
+  // 当城市筛选发生变化时，自动触发地图搜索
+  handleMapSearch();
+}
+
 function handleLocationChange(val: string[]) {
   // You can update chart or filter logic here
   // val: [] for 全国, [province], or [province, city]
@@ -676,7 +883,10 @@ async function handleStartCityChange(val: string[]) {
   
   await fetchStatisticsSummary(selectedDate.value, start, end);
   await fetchStatisticsTrend(selectedDate.value, start, end);
+  await fetchAircraftData(selectedDate.value, start, end);
   renderCubeBarChart();
+  renderAircraftTypeChart();
+  renderFleetChart();
 }
 
 async function handleEndCityChange(val: string[]) {
@@ -688,7 +898,10 @@ async function handleEndCityChange(val: string[]) {
   
   await fetchStatisticsSummary(selectedDate.value, start, end);
   await fetchStatisticsTrend(selectedDate.value, start, end);
+  await fetchAircraftData(selectedDate.value, start, end);
   renderCubeBarChart();
+  renderAircraftTypeChart();
+  renderFleetChart();
 }
 
 async function handleSearch() {
@@ -703,9 +916,32 @@ async function handleSearch() {
   // 调用API获取统计数据
   await fetchStatisticsSummary(selectedDate.value, start, end);
   await fetchStatisticsTrend(selectedDate.value, start, end);
+  await fetchAircraftData(selectedDate.value, start, end);
 
-  // 刷新柱状图
+  // 刷新图表
   renderCubeBarChart();
+  renderAircraftTypeChart();
+  renderFleetChart();
+}
+
+// 获取城市筛选中选中的城市列表
+function getSelectedCities(): string[] {
+  if (!selectedMapSelectedCity.value || selectedMapSelectedCity.value.length === 0) {
+    return ['全国'];
+  }
+  
+  return selectedMapSelectedCity.value.map(path => {
+    if (Array.isArray(path)) {
+      return path[path.length - 1]; // 取路径的最后一个元素
+    }
+    return path;
+  });
+}
+
+// 检查是否选择了全国
+function isNationalSelected(): boolean {
+  const selectedCities = getSelectedCities();
+  return selectedCities.includes('') || selectedCities.includes('全国');
 }
 
 async function handleMapSearch() {
@@ -717,251 +953,222 @@ async function handleMapSearch() {
     ? selectedMapToCity.value[1]
     : (selectedMapToCity.value && selectedMapToCity.value.length === 1 ? selectedMapToCity.value[0] : '');
 
-  // 如果用户没有选择城市，默认设置为"全国"
-  const originCity = fromCity || '全国';
-  const destCity = toCity || '全国';
-
+  // 获取城市筛选中选中的城市
+  const selectedCities = getSelectedCities();
+  const isNational = isNationalSelected();
+  
   console.log('🔍 地图搜索参数:', { 
     yearMonth: selectedDate.value, 
-    originCity, 
-    destCity 
+    selectedCities,
+    isNational,
+    fromCity, 
+    toCity 
   });
 
-  // 调用新的航线分布API
-  await fetchRouteDistributionWithCities(selectedDate.value, originCity, destCity);
+  // 使用新的后端API，让后端处理所有逻辑
+  await fetchRouteDistributionAdvanced(selectedDate.value, selectedCities, fromCity, toCity);
   
   // 更新地图显示
   renderMap();
 }
-// 生命周期钩子
-const statTypeLabelMap: Record<string, string> = {
-  capacity: '运力',
-  volume: '运量',
-  flights: '航班数量'
-};
-
-const statTypeOptions = [
-  { value: 'capacity', label: '运力统计' },
-  { value: 'volume', label: '运量统计' },
-  { value: 'flights', label: '航班数量' }
-];
-
+// 图表相关
 const cubeChartRef = ref<HTMLElement | null>(null);
 let cubeChartInstance: echarts.ECharts | null = null;
 
-const registerCustomShapes = () => {
-  const offsetX = 12;
-  const offsetY = 7;
+// 玫瑰图相关
+const aircraftTypeChartRef = ref<HTMLElement | null>(null);
+const fleetChartRef = ref<HTMLElement | null>(null);
+let aircraftTypeChartInstance: echarts.ECharts | null = null;
+let fleetChartInstance: echarts.ECharts | null = null;
 
-  // 左侧面
-  const CubeLeft = echarts.graphic.extendShape({
-    shape: { x: 0, y: 0 },
-    buildPath(ctx, shape) {
-      const xAxisPoint = shape.xAxisPoint;
-      const c0 = [shape.x, shape.y];
-      const c1 = [shape.x - offsetX, shape.y - offsetY];
-      const c2 = [xAxisPoint[0] - offsetX, xAxisPoint[1] - offsetY];
-      const c3 = [xAxisPoint[0], xAxisPoint[1]];
-      ctx.moveTo(c0[0], c0[1]);
-      ctx.lineTo(c1[0], c1[1]);
-      ctx.lineTo(c2[0], c2[1]);
-      ctx.lineTo(c3[0], c3[1]);
-      ctx.closePath();
-    }
-  });
-  // 右侧面
-  const CubeRight = echarts.graphic.extendShape({
-    shape: { x: 0, y: 0 },
-    buildPath(ctx, shape) {
-      const xAxisPoint = shape.xAxisPoint;
-      const c1 = [shape.x, shape.y];
-      const c2 = [xAxisPoint[0], xAxisPoint[1]];
-      const c3 = [xAxisPoint[0] + offsetX, xAxisPoint[1] - offsetY];
-      const c4 = [shape.x + offsetX, shape.y - offsetY];
-      ctx.moveTo(c1[0], c1[1]);
-      ctx.lineTo(c2[0], c2[1]);
-      ctx.lineTo(c3[0], c3[1]);
-      ctx.lineTo(c4[0], c4[1]);
-      ctx.closePath();
-    }
-  });
-  // 顶面
-  const CubeTop = echarts.graphic.extendShape({
-    shape: { x: 0, y: 0 },
-    buildPath(ctx, shape) {
-      const c1 = [shape.x, shape.y];
-      const c2 = [shape.x + offsetX, shape.y - offsetY];
-      const c3 = [shape.x, shape.y - offsetX];
-      const c4 = [shape.x - offsetX, shape.y - offsetY];
-      ctx.moveTo(c1[0], c1[1]);
-      ctx.lineTo(c2[0], c2[1]);
-      ctx.lineTo(c3[0], c3[1]);
-      ctx.lineTo(c4[0], c4[1]);
-      ctx.closePath();
-    }
-  });
-
-  echarts.graphic.registerShape('CubeLeft', CubeLeft);
-  echarts.graphic.registerShape('CubeRight', CubeRight);
-  echarts.graphic.registerShape('CubeTop', CubeTop);
-};
-
-const getLast12Months = () => {
+const getLastNMonths = (n: number) => {
   const months = [];
   const now = new Date();
-  for (let i = 11; i >= 0; i--) {
+  for (let i = n - 1; i >= 0; i--) {
     const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
     months.push(`${d.getFullYear()}-${(d.getMonth() + 1).toString().padStart(2, '0')}`);
   }
   return months;
 };
 
-const generateRandomData = (max: number) => {
-  return Array.from({ length: 12 }, () => Math.floor(Math.random() * (max * 0.8)) + Math.floor(max * 0.2));
+const getLast12Months = () => {
+  return getLastNMonths(12);
 };
 
-
-
-const statMaxMap = {
-  capacity: 1500,
-  volume: 1200,
-  flights: 200
+// 处理时间周期变化
+const handleTimePeriodChange = () => {
+  // 更新timePeriod变量
+  timePeriod.value = month_number.value;
+  console.log('🔄 时间周期已更改为:', timePeriod.value, '个月');
+  
+  // 重新获取趋势数据
+  fetchStatisticsTrend(
+    selectedDate.value, 
+    selectedStartCity.value[selectedStartCity.value.length - 1], 
+    selectedEndCity.value[selectedEndCity.value.length - 1]
+  ).then(() => {
+    // 数据获取完成后重新渲染图表
+    renderCubeBarChart();
+  });
 };
 
-// 获取当前统计类型的最大值
-const getCurrentMax = () => {
-  const data = filteredTrendData[selectedStatType.value];
-  if (!data || data.length === 0) return 100; // 默认最大值
-  return Math.max(...data);
+const generateRandomData = (max: number, length: number = 12) => {
+  return Array.from({ length }, () => Math.floor(Math.random() * (max * 0.8)) + Math.floor(max * 0.2));
 };
 
 const renderCubeBarChart = () => {
   if (!cubeChartRef.value) return;
   if (cubeChartInstance) cubeChartInstance.dispose();
 
-  registerCustomShapes();
-
   cubeChartInstance = echarts.init(cubeChartRef.value);
 
-  // 使用后端返回的月份数据，如果没有则使用默认的12个月
+  // 使用后端返回的月份数据，如果没有则使用默认的时间周期
   const months = filteredTrendData.months && filteredTrendData.months.length > 0 
     ? filteredTrendData.months 
-    : getLast12Months();
-  const currentMax = getCurrentMax();
-  const MAX = Array(months.length).fill(currentMax);
-  const VALUE = filteredTrendData[selectedStatType.value] || Array(months.length).fill(0);
+    : getLastNMonths(timePeriod.value);
+  
+  // 获取数据，如果没有则生成默认数据
+  const capacityData = filteredTrendData.capacity && filteredTrendData.capacity.length > 0 
+    ? filteredTrendData.capacity 
+    : generateRandomData(1500, timePeriod.value);
+  const volumeData = filteredTrendData.volume && filteredTrendData.volume.length > 0 
+    ? filteredTrendData.volume 
+    : generateRandomData(1200, timePeriod.value);
+  const flightsData = filteredTrendData.flights && filteredTrendData.flights.length > 0 
+    ? filteredTrendData.flights 
+    : generateRandomData(200, timePeriod.value);
 
   const option = {
     backgroundColor: 'transparent',
     tooltip: {
       trigger: 'axis',
-      axisPointer: { type: 'shadow' },
+      axisPointer: { type: 'cross' },
       formatter(params: any) {
-        const item = params[1];
-        return item.name + ' : ' + item.value + (selectedStatType.value === 'flights' ? ' 班次' : ' 人次');
+        let result = params[0].name + '<br/>';
+        params.forEach((param: any) => {
+          const marker = param.marker || '';
+          const value = param.value;
+          let unit = '';
+          if (param.seriesName === '运力' || param.seriesName === '运量') {
+            unit = ' 万 人次';
+          } else if (param.seriesName === '航班数量') {
+            unit = ' 班次';
+          }
+          result += marker + param.seriesName + ': ' + value + unit + '<br/>';
+        });
+        return result;
       }
     },
-    grid: { left: '10%', right: '10%', top: '15%', bottom: '10%', containLabel: true },
+    legend: {
+      data: ['运力', '运量', '航班数量'],
+      textStyle: { color: '#052233' },
+      top: 10
+    },
+    grid: { 
+      left: '10%', 
+      right: '10%', 
+      top: '15%', 
+      bottom: '10%', 
+      containLabel: true 
+    },
     xAxis: {
       type: 'category',
       data: months,
       axisLine: { show: true, lineStyle: { width: 2, color: '#2B7BD6' } },
       axisTick: { show: false },
-      axisLabel: { fontSize: 12, color: '#000305', rotate: 30 }
+      axisLabel: { fontSize: 12, color: '#000305', rotate: 20 }
     },
-    yAxis: {
-      type: 'value',
-      name: selectedStatType.value === 'capacity' ? '人次' : selectedStatType.value === 'volume' ? '人次' : '班次',
-      nameTextStyle: { color: '#052233' },
-      axisLine: { show: true, lineStyle: { width: 2, color: '#2B7BD6' } },
-      splitLine: { show: true, lineStyle: { color: 'rgba(43, 123, 214, 0.2)' } },
-      axisTick: { show: false },
-      axisLabel: { fontSize: 12, color: '#000305' }
-    },
+    yAxis: [
+      {
+        type: 'value',
+        name: '万 人次',
+        nameTextStyle: { color: '#052233' },
+        axisLine: { show: true, lineStyle: { width: 2, color: '#8c68fc' } },
+        splitLine: { show: true, lineStyle: { color: 'rgba(43, 123, 214, 0.2)' } },
+        axisTick: { show: false },
+        axisLabel: { fontSize: 12, color: '#000305' },
+        position: 'left'
+      },
+      {
+        type: 'value',
+        name: '班次',
+        nameTextStyle: { color: '#052233' },
+        axisLine: { show: true, lineStyle: { width: 2, color: '#44befc' } },
+        splitLine: { show: false },
+        axisTick: { show: false },
+        axisLabel: { fontSize: 12, color: '#000305' },
+        position: 'right'
+      }
+    ],
     series: [
       {
-        type: 'custom',
-        renderItem: function(params: any, api: any) {
-          const location = api.coord([api.value(0), api.value(1)]);
-          return {
-            type: 'group',
-            children: [
-              {
-                type: 'CubeLeft',
-                shape: { api, x: location[0], y: location[1], xAxisPoint: api.coord([api.value(0), 0]) },
-                style: { fill: `rgba(25,155,172,.1)` }
-              },
-              {
-                type: 'CubeRight',
-                shape: { api, x: location[0], y: location[1], xAxisPoint: api.coord([api.value(0), 0]) },
-                style: { fill: `rgba(25,155,172,.3)` }
-              },
-              {
-                type: 'CubeTop',
-                shape: { api, x: location[0], y: location[1], xAxisPoint: api.coord([api.value(0), 0]) },
-                style: { fill: `rgba(25,155,172,.4)` }
-              }
-            ]
-          };
+        name: '运力',
+        type: 'line',
+        yAxisIndex: 0,
+        data: capacityData,
+        smooth: true,
+        lineStyle: {
+          width: 2,
+          color: '#8c68fc'
         },
-        data: MAX
+        itemStyle: {
+          color: '#8c68fc',
+          borderWidth: 1,
+          borderColor: '#fff'
+        },
+        // areaStyle: {
+        //   color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        //     { offset: 0, color: 'rgba(78, 205, 196, 0.3)' },
+        //     { offset: 1, color: 'rgba(78, 205, 196, 0.1)' }
+        //   ])
+        // },
+        symbol: 'circle',
+        symbolSize: 8
       },
       {
-        type: 'custom',
-        renderItem: function(params: any, api: any) {
-          const location = api.coord([api.value(0), api.value(1)]);
-          const index = params.dataIndex;
-          const colors = [
-            "25,155,172", "45,183,202", "65,211,232",
-            "85,239,255", "105,200,255", "125,180,255", "145,160,255", "25,155,172", "45,183,202", "65,211,232",
-            "85,239,255", "105,200,255"
-          ];
-          const color = colors[index % colors.length];
-          return {
-            type: 'group',
-            children: [
-              {
-                type: 'CubeLeft',
-                shape: { api, x: location[0], y: location[1], xAxisPoint: api.coord([api.value(0), 0]) },
-                style: { fill: `rgba(${color}, .5)` }
-              },
-              {
-                type: 'CubeRight',
-                shape: { api, x: location[0], y: location[1], xAxisPoint: api.coord([api.value(0), 0]) },
-                style: {
-                  fill: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: `rgba(${color},1)` },
-                    { offset: 1, color: `rgba(${color},.5)` }
-                  ])
-                }
-              },
-              {
-                type: 'CubeTop',
-                shape: { api, x: location[0], y: location[1], xAxisPoint: api.coord([api.value(0), 0]) },
-                style: {
-                  fill: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-                    { offset: 0, color: `rgba(${color},1)` },
-                    { offset: 1, color: `rgba(${color},1)` }
-                  ])
-                }
-              }
-            ]
-          };
+        name: '运量',
+        type: 'line',
+        yAxisIndex: 0,
+        data: volumeData,
+        smooth: true,
+        lineStyle: {
+          width: 2,
+          color: '#246eff'
         },
-        data: VALUE
+        itemStyle: {
+          color: '#246eff',
+          borderWidth: 1,
+          borderColor: '#fff'
+        },
+        // areaStyle: {
+        //   color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        //     { offset: 0, color: 'rgba(69, 183, 209, 0.3)' },
+        //     { offset: 1, color: 'rgba(69, 183, 209, 0.1)' }
+        //   ])
+        // },
+        symbol: 'diamond',
+        symbolSize: 8
       },
       {
+        name: '航班数量',
         type: 'bar',
+        yAxisIndex: 1,
+        data: flightsData,
+        itemStyle: {
+          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+            { offset: 0, color: '#44befc' },
+            { offset: 1, color: '#e4f0ff' }
+          ]),
+          borderRadius: [4, 4, 0, 0]
+        },
+        barWidth: '60%',
         label: {
-          show: true,
+          show: false,
           position: 'top',
           formatter: (e: any) => e.value,
           fontSize: 10,
-          color: '#000000',
-          offset: [0, -25]
-        },
-        itemStyle: { color: 'transparent' },
-        data: VALUE
+          color: '#000305'
+        }
       }
     ]
   };
@@ -969,8 +1176,145 @@ const renderCubeBarChart = () => {
   cubeChartInstance.setOption(option);
 };
 
+// 渲染机型玫瑰图
+const renderAircraftTypeChart = () => {
+  if (!aircraftTypeChartRef.value) return;
+  if (aircraftTypeChartInstance) aircraftTypeChartInstance.dispose();
+
+  aircraftTypeChartInstance = echarts.init(aircraftTypeChartRef.value);
+
+  const option = {
+    title: {
+      text: '  机型分布',
+      left: 'left',
+      textStyle: {
+        color: '#2B7BD6',
+        fontSize: 16,
+        fontWeight: 'bold',
+      }
+    },
+    tooltip: {
+      trigger: 'item',
+      formatter: '{a} <br/>{b} : {c} ({d}%)'
+    },
+    legend: {
+      left: 'center',
+      top: 'bottom',
+      textStyle: {
+        color: '#052233',
+        fontSize: 10
+      },
+      data: aircraftData.aircraftTypes.map(item => item.name)
+    },
+    toolbox: {
+      show: true,
+      feature: {
+        mark: { show: true },
+        dataView: { show: true, readOnly: false },
+        restore: { show: true },
+        saveAsImage: { show: true }
+      }
+    },
+    series: [
+      {
+        name: '  机型分布',
+        type: 'pie',
+        radius: [20, 110],
+        center: ['50%', '50%'],
+        roseType: 'radius',
+        itemStyle: {
+          borderRadius: 5
+        },
+        label: {
+          show: false
+        },
+        emphasis: {
+          label: {
+            show: false,
+            formatter: '{b}: {c} ({d}%)'
+          }
+        },
+        data: aircraftData.aircraftTypes
+      }
+    ]
+  };
+
+  aircraftTypeChartInstance.setOption(option);
+};
+
+// 渲染机队玫瑰图
+const renderFleetChart = () => {
+  if (!fleetChartRef.value) return;
+  if (fleetChartInstance) fleetChartInstance.dispose();
+
+  fleetChartInstance = echarts.init(fleetChartRef.value);
+
+  const option = {
+    title: {
+      text: '机队分布',
+      left: 'left',
+      textStyle: {
+        color: '#2B7BD6',
+        fontSize: 16,
+        fontWeight: 'bold'
+      }
+    },
+    tooltip: {
+      trigger: 'item',
+      formatter: '{a} <br/>{b} : {c} ({d}%)'
+    },
+    legend: {
+      left: 'center',
+      top: 'bottom',
+      textStyle: {
+        color: '#052233',
+        fontSize: 10
+      },
+      data: aircraftData.fleetData.map(item => item.name)
+    },
+    toolbox: {
+      show: true,
+      feature: {
+        mark: { show: true },
+        dataView: { show: true, readOnly: false },
+        restore: { show: true },
+        saveAsImage: { show: true }
+      }
+    },
+    series: [
+      {
+        name: '机队分布',
+        type: 'pie',
+        radius: [20, 110],
+        center: ['50%', '50%'],
+        roseType: 'area',
+        itemStyle: {
+          borderRadius: 5
+        },
+        label: {
+          show: false
+        },
+        emphasis: {
+          label: {
+            show: false,
+            formatter: '{b}: {c} ({d}%)'
+          }
+        },
+        data: aircraftData.fleetData
+      }
+    ]
+  };
+
+  fleetChartInstance.setOption(option);
+};
+
 const handleCubeResize = () => {
   cubeChartInstance?.resize();
+};
+
+const handleRoseChartsResize = () => {
+  aircraftTypeChartInstance?.resize();
+  fleetChartInstance?.resize();
 };
 
 watch(
@@ -978,6 +1322,26 @@ watch(
   (el) => {
     if (el) {
       renderCubeBarChart();
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => aircraftTypeChartRef.value,
+  (el) => {
+    if (el) {
+      renderAircraftTypeChart();
+    }
+  },
+  { immediate: true }
+);
+
+watch(
+  () => fleetChartRef.value,
+  (el) => {
+    if (el) {
+      renderFleetChart();
     }
   },
   { immediate: true }
@@ -1014,6 +1378,7 @@ onMounted(async () => {
     // 4. 添加窗口大小监听
     window.addEventListener('resize', handleResize);
     window.addEventListener('resize', handleCubeResize);
+    window.addEventListener('resize', handleRoseChartsResize);
     
     // 5. 加载默认数据（全国数据）
     console.log('📊 开始加载默认数据...');
@@ -1022,7 +1387,8 @@ onMounted(async () => {
     await Promise.all([
       fetchRouteDistributionWithCities(selectedDate.value, '全国', '全国'),
       fetchStatisticsSummary(selectedDate.value),
-      fetchStatisticsTrend(selectedDate.value)
+      fetchStatisticsTrend(selectedDate.value, undefined, undefined),  // 传递undefined表示全国数据
+      fetchAircraftData(selectedDate.value, undefined, undefined)
     ]);
     
     console.log('✅ 所有数据加载完成');
@@ -1030,6 +1396,8 @@ onMounted(async () => {
     // 6. 渲染图表
     renderMap();
     renderCubeBarChart();
+    renderAircraftTypeChart();
+    renderFleetChart();
     
     console.log('✅ 图表渲染完成');
   } catch (error) {
@@ -1046,11 +1414,12 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   window.removeEventListener('resize', handleResize);
   window.removeEventListener('resize', handleCubeResize);
+  window.removeEventListener('resize', handleRoseChartsResize);
   if (cubeChartInstance) cubeChartInstance.dispose();
+  if (aircraftTypeChartInstance) aircraftTypeChartInstance.dispose();
+  if (fleetChartInstance) fleetChartInstance.dispose();
 });
-watch(() => selectedStatType.value, () => {
-  nextTick(() => renderCubeBarChart());
-});
+
 
 // 移除时间变化的自动更新监听器，现在只有点击查找按钮才会更新
 // watch(() => selectedDate.value, async (newVal, oldVal) => {
@@ -1118,6 +1487,7 @@ body {
   flex-direction: column;
   gap: 10px;
   backdrop-filter: blur(10px);
+  width: 100%;
 }
 
 .panel-title {
@@ -1125,15 +1495,15 @@ body {
   align-items: center;
   color: #000;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 5px;
   font-size: 1.2rem;
-  padding-bottom: 10px;
+  padding-bottom: 5px;
   border-bottom: 2px solid rgba(70, 130, 180, 0.5);
 }
 
 .filters {
   display: flex;
-  gap: 10px;
+  gap: 1px;
   margin-bottom: 10px;
   flex-wrap: wrap;
   flex-direction: row; 
@@ -1142,7 +1512,7 @@ body {
 
 .filter-group {
   flex: 1;
-  min-width: 180px;
+  min-width: 10px;
   flex-wrap: wrap;
   flex-direction: row;
   align-items: flex-end;
@@ -1154,6 +1524,32 @@ body {
   margin-right: 8px;
   font-weight: 600;
   color: #7cb9e8;
+}
+
+/* 控制城市筛选器的显示样式 */
+:deep(.el-cascader) {
+  max-width: 100%;
+}
+
+:deep(.el-cascader .el-input__inner) {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.el-cascader .el-tag) {
+  max-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:deep(.el-cascader .el-tag .el-tag__content) {
+  max-width: 60px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chart-container {
@@ -1203,16 +1599,37 @@ body {
 
 .bar-chart-container {
   flex: 1;
-  min-height: 300px;
+  min-height: 270px;
+  margin-top: -30px;
   border-radius: 10px;
   overflow: hidden;
+  width: 100%;
+}
+
+.rose-chart-container {
+  flex: 1;
+  min-height: 80px;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.rose-charts-wrapper {
+  display: flex;
+  gap: 5px;
+  height: 90%;
+}
+
+.rose-chart-item {
+  flex: 1;
+  border-radius: 5px;
+  transition: transform 0.3s ease;
 }
 
 .bar-chart-header {
   display: flex;
   align-items: center;
-  justify-content: space-between; /* 或 flex-start，看你想左对齐还是两端对齐 */
-  margin-bottom: 10px; /* 适当调整间距 */
+  justify-content: space-between;
+  margin-bottom: 10px;
 }
 
 .bar-chart-header .chart-title {
@@ -1221,7 +1638,6 @@ body {
 
 .bar-chart-container .chart-title {
   text-align: center;
-  margin-top: 5px;
   color: #2B7BD6;
   font-weight: bold;
   font-size: 1.1rem;

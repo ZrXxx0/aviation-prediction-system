@@ -20,6 +20,7 @@ from . import views
 
 urlpatterns = [
     path('routes/', views.route_distribution_view, name='route_distribution'),
+    path('routes/advanced/', views.route_distribution_advanced_view, name='route_distribution_advanced'),
     path('statistics/summary/', views.statistics_summary_view, name='statistics_summary'),
     path('statistics/trend/', views.statistics_trend_view, name='statistics_trend'),
 ]

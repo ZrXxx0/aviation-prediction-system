@@ -31,8 +31,10 @@ const API_ENDPOINTS = {
   SHOW: {
     ROUTES: '/show/routes/',
     ROUTE_DISTRIBUTION: '/show/routes/',
+    ROUTE_DISTRIBUTION_ADVANCED: '/show/routes/advanced/',
     STATISTICS_SUMMARY: '/show/statistics/summary/',
     STATISTICS_TREND: '/show/statistics/trend/',
+    AIRCRAFT_DATA: '/show/statistics/aircraft-data/',
   },
   // 预测相关API
   PREDICT: {
