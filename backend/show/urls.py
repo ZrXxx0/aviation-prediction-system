@@ -23,4 +23,5 @@ urlpatterns = [
     path('routes/advanced/', views.route_distribution_advanced_view, name='route_distribution_advanced'),
     path('statistics/summary/', views.statistics_summary_view, name='statistics_summary'),
     path('statistics/trend/', views.statistics_trend_view, name='statistics_trend'),
+    path('statistics/aircraft-data/', views.aircraft_data_view, name='aircraft_data'),
 ]

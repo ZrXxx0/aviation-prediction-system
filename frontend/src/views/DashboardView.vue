@@ -201,6 +201,9 @@ const aircraftData = reactive({
   fleetData: []
 });
 
+// 省份运量数据
+const provinceVolumeData = ref([]);
+
 // 获取航线分布数据
 const fetchRouteDistribution = async (yearMonth: string, city?: string) => {
   try {
@@ -428,8 +431,8 @@ const fetchStatisticsTrend = async (yearMonth: string, startCity?: string, endCi
 const fetchAircraftData = async (yearMonth: string, startCity?: string, endCity?: string) => {
   try {
     const params = new URLSearchParams({ year_month: yearMonth });
-    if (startCity) params.append('start_city', startCity);
-    if (endCity) params.append('end_city', endCity);
+    if (startCity) params.append('origin_province', startCity);
+    if (endCity) params.append('dest_province', endCity);
     
     const response = await fetch(apiConfig.getUrl(apiConfig.endpoints.SHOW.AIRCRAFT_DATA) + `?${params}`);
     if (!response.ok) {
@@ -437,31 +440,86 @@ const fetchAircraftData = async (yearMonth: string, startCity?: string, endCity?
     }
     const data = await response.json();
     
-    aircraftData.aircraftTypes = data.aircraft_types || [];
-    aircraftData.fleetData = data.fleet_data || [];
+    // 转换后端数据格式为前端需要的格式，只显示前5种，其他合并为"其他"
+    const allEquipment = (data.equipment_distribution || []).map(item => ({
+      value: item.flights,
+      name: item.equipment,
+      percentage: parseFloat(item.percentage.toFixed(2)) // 确保百分比为两位小数
+    }));
+    
+    // 只有当机型数量大于5时才进行拆分
+    if (allEquipment.length > 7) {
+      // 只取前5种机型
+      const top5Equipment = allEquipment.slice(0, 7);
+      const otherEquipment = allEquipment.slice(7);
+      
+      // 计算"其他"的总数据
+      const otherTotal = otherEquipment.reduce((sum, item) => sum + item.value, 0);
+      const otherPercentage = parseFloat(otherEquipment.reduce((sum, item) => sum + item.percentage, 0).toFixed(2));
+      
+      aircraftData.aircraftTypes = [
+        ...top5Equipment,
+        {
+          value: otherTotal,
+          name: '其他',
+          percentage: otherPercentage,
+          children: otherEquipment // 保存其他机型的详细信息
+        }
+      ];
+    } else {
+      // 机型数量小于等于5，直接显示所有机型
+      aircraftData.aircraftTypes = allEquipment;
+    }
+    
+    // 处理机队数据，直接显示所有机队类型（不进行拆分）
+    aircraftData.fleetData = (data.fleet_distribution || []).map(item => ({
+      value: item.flights,
+      name: item.fleet_type,
+      percentage: parseFloat(item.percentage.toFixed(2)) // 确保百分比为两位小数
+    }));
     console.log('✅ 成功获取机型和机队数据:', aircraftData);
   } catch (error) {
     console.error('❌ 获取机型和机队数据失败:', error);
-    // 设置默认机型和机队数据
-    aircraftData.aircraftTypes = [
-      { value: 35, name: 'B737' },
-      { value: 28, name: 'A320' },
-      { value: 22, name: 'B787' },
-      { value: 18, name: 'A330' },
-      { value: 15, name: 'B777' },
-      { value: 12, name: 'A350' },
-      { value: 10, name: 'B747' },
-      { value: 8, name: 'A380' }
+    // 设置默认机型和机队数据（只显示前5种，其他合并为"其他"）
+    const defaultEquipment = [
+      { value: 35, name: 'B737', percentage: 35.00 },
+      { value: 28, name: 'A320', percentage: 28.00 },
+      { value: 22, name: 'B787', percentage: 22.00 },
+      { value: 18, name: 'A330', percentage: 18.00 },
+      { value: 15, name: 'B777', percentage: 15.00 },
+      { value: 12, name: 'A350', percentage: 12.00 },
+      { value: 10, name: 'B747', percentage: 10.00 },
+      { value: 8, name: 'A380', percentage: 8.00 }
     ];
+    
+    // 只有当机型数量大于5时才进行拆分
+    if (defaultEquipment.length > 7) {
+      const top5Default = defaultEquipment.slice(0, 7);
+      const otherDefault = defaultEquipment.slice(7);
+      const otherTotal = otherDefault.reduce((sum, item) => sum + item.value, 0);
+      const otherPercentage = parseFloat(otherDefault.reduce((sum, item) => sum + item.percentage, 0).toFixed(2));
+      
+      aircraftData.aircraftTypes = [
+        ...top5Default,
+        {
+          value: otherTotal,
+          name: '其他',
+          percentage: otherPercentage,
+          children: otherDefault
+        }
+      ];
+    } else {
+      aircraftData.aircraftTypes = defaultEquipment;
+    }
+    // 设置默认机队数据（直接显示所有机队类型）
     aircraftData.fleetData = [
-      { value: 42, name: '中国国航' },
-      { value: 38, name: '东方航空' },
-      { value: 35, name: '南方航空' },
-      { value: 28, name: '海南航空' },
-      { value: 25, name: '深圳航空' },
-      { value: 22, name: '厦门航空' },
-      { value: 18, name: '四川航空' },
-      { value: 15, name: '春秋航空' }
+      { value: 42, name: '中型窄体客机', percentage: 42.00 },
+      { value: 38, name: '小型窄体客机', percentage: 38.00 },
+      { value: 35, name: '大型窄体客机', percentage: 35.00 },
+      { value: 28, name: '小型宽体客机', percentage: 28.00 },
+      { value: 25, name: '中型宽体客机', percentage: 25.00 },
+      { value: 22, name: '大型宽体客机', percentage: 22.00 },
+      { value: 18, name: '大型涡扇支线客机', percentage: 18.00 }
     ];
     console.log('📊 使用默认机型和机队数据:', aircraftData);
   }
@@ -696,12 +754,12 @@ const renderMap = () => {
   const flightCityData = Array.from(flightCities).map(city => ({
     name: city,
     value: geoCoordMap.value[city],
-    itemStyle: { color: '#e6c652' }, // 高亮色
+    itemStyle: { color: '#ffb701' }, // 高亮色
     label: { show: true, position: 'right', formatter: '{b}' }
   }));
 
   const option = {
-    backgroundColor: '#c0dcef',
+    backgroundColor: '#fff',
     tooltip: {
       trigger: 'item', 
       formatter: (params) => {
@@ -747,7 +805,7 @@ const renderMap = () => {
       zoom: 1.2,
       label: {emphasis: {show: false}},
       roam: true,
-      itemStyle: {normal: {areaColor: '#323c48', borderColor: '#4e5667'}, emphasis: {areaColor: '#2a333d'}}
+      itemStyle: {normal: {areaColor: '#2a333d', borderColor: '#ece8e8'}, emphasis: {areaColor: '#1067b3'}}
     },
     series: [
       {
@@ -774,7 +832,7 @@ const renderMap = () => {
         coordinateSystem: 'geo',
         zlevel: 1,
         effect: {show: true, period: 4, trailLength: 0.02, symbol: 'arrow', symbolSize: 5},
-        lineStyle: {normal: {color: '#ffffff', width: 1, opacity: 0.6, curveness: 0.2}},
+        lineStyle: {normal: {color: '#ffeea9', width: 1, opacity: 0.6, curveness: 0.2}},
         data: convertData(filteredDatas)
       }]
   };
@@ -1195,7 +1253,65 @@ const renderAircraftTypeChart = () => {
     },
     tooltip: {
       trigger: 'item',
-      formatter: '{a} <br/>{b} : {c} ({d}%)'
+      position: function (point: any, params: any, dom: any, rect: any, size: any) {
+        // 获取图表容器的位置和大小
+        const chartContainer = document.querySelector('#aircraft-type-chart') as HTMLElement;
+        if (chartContainer) {
+          const containerRect = chartContainer.getBoundingClientRect();
+          const containerWidth = containerRect.width;
+          const containerHeight = containerRect.height;
+          
+          // 计算tooltip的宽度和高度
+          const tooltipWidth = size.contentSize[0];
+          const tooltipHeight = size.contentSize[1];
+          
+          // 如果鼠标在图表左半部分，tooltip显示在右侧
+          if (point[0] < containerWidth / 2) {
+            // 确保tooltip不会超出容器右边界
+            const rightPosition = point[0] + 60;
+            const topPosition = Math.max(10, Math.min(point[1] - tooltipHeight / 2, containerHeight - tooltipHeight - 10));
+            return [rightPosition, topPosition];
+          } else {
+            // 鼠标在右半部分，tooltip显示在左侧
+            const leftPosition = Math.max(10, point[0] - tooltipWidth - 60);
+            const topPosition = Math.max(10, Math.min(point[1] - tooltipHeight / 2, containerHeight - tooltipHeight - 10));
+            return [leftPosition, topPosition];
+          }
+        }
+        return [point[0] + 10, point[1] - 10]; // 默认位置
+      },
+      formatter: (params: any) => {
+        const data = aircraftData.aircraftTypes.find(item => item.name === params.name);
+        const percentage = data?.percentage || params.percent;
+        
+        // 如果是"其他"类型，显示详细的机型列表（自动分为两列）
+        if (params.name === '其他' && data?.children) {
+          const children = data.children;
+          const midPoint = Math.ceil(children.length / 2);
+          const leftColumn = children.slice(0, midPoint);
+          const rightColumn = children.slice(midPoint);
+          
+          const leftList = leftColumn.map((child: any) => 
+            `${child.name}: ${child.value} 航班 (${child.percentage.toFixed(2)}%)`
+          ).join('<br/>');
+          
+          const rightList = rightColumn.map((child: any) => 
+            `${child.name}: ${child.value} 航班 (${child.percentage.toFixed(2)}%)`
+          ).join('<br/>');
+          
+          // 创建两列布局
+          const twoColumnLayout = `
+            <div style="display: flex; gap: 20px;">
+              <div>${leftList}</div>
+              <div>${rightList}</div>
+            </div>
+          `;
+          
+          return `${params.seriesName}<br/>${params.name}: ${params.value} 航班 (${percentage.toFixed(2)}%)<br/><br/>包含机型：<br/>${twoColumnLayout}`;
+        }
+        
+        return `${params.seriesName}<br/>${params.name}: ${params.value} 航班 (${percentage.toFixed(2)}%)`;
+      }
     },
     legend: {
       left: 'center',
@@ -1261,7 +1377,11 @@ const renderFleetChart = () => {
     },
     tooltip: {
       trigger: 'item',
-      formatter: '{a} <br/>{b} : {c} ({d}%)'
+      formatter: (params: any) => {
+        const data = aircraftData.fleetData.find(item => item.name === params.name);
+        const percentage = data?.percentage || params.percent;
+        return `${params.seriesName}<br/>${params.name}: ${params.value} 航班 (${percentage.toFixed(2)}%)`;
+      }
     },
     legend: {
       left: 'center',

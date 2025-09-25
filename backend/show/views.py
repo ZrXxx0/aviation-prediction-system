@@ -9,6 +9,7 @@ from django.core.exceptions import ObjectDoesNotExist
 import os
 import json
 from collections import defaultdict
+from predict.models import FlightMarketRecord
 
 # 公共：根据 IATA 三字码构建映射信息（从数据库获取）
 def build_info(iata_code):
@@ -537,4 +538,178 @@ def statistics_trend_view(request):
     }
     print(f"✅ 返回趋势数据: {result}")
 
+    return Response(result)
+
+
+# 机型数据统计接口
+@api_view(['GET'])
+def aircraft_data_view(request):
+    """
+    获取机型数据统计
+    - year_month: 必填，YYYY-MM格式，指定当前月
+    - origin_province: 可选，起点城市或省份（"全国"表示不限制）
+    - dest_province: 可选，终点城市或省份（"全国"表示不限制）
+
+    返回数据：
+    1. 机型占比情况（equipment字段统计）
+    2. 机队分布情况（基于平均座位数映射）
+    """
+    year_month = request.GET.get("year_month")
+    origin_province = request.GET.get("origin_province", "全国")
+    dest_province = request.GET.get("dest_province", "全国")
+
+    print(
+        f"🔍 接收到参数 - year_month: {year_month}, origin_province: {origin_province}, dest_province: {dest_province}")
+
+    # 参数验证
+    if not year_month or '-' not in year_month:
+        return Response({"error": "year_month 格式应为 YYYY-MM，如 2024-06"}, status=400)
+
+    try:
+        year_str, month_str = year_month.split("-")
+        year = int(year_str)
+        month = int(month_str)
+        if not (1 <= month <= 12):
+            return Response({"error": "月份必须在1-12之间"}, status=400)
+    except ValueError:
+        return Response({"error": "year_month 格式应为 YYYY-MM，如 2024-06"}, status=400)
+
+    # 构建查询条件
+    filters = {"year_month": year_month}
+
+    # 处理起点城市/省份筛选
+    if origin_province != "全国":
+        # 首先尝试作为城市名查找
+        origin_codes = get_codes_by_city(origin_province)
+        if origin_codes:
+            # 找到了城市对应的机场代码
+            filters["origin__in"] = origin_codes
+            print(f"🔍 起点城市 {origin_province} 的机场: {origin_codes}")
+        else:
+            # 如果城市名没找到，尝试作为省份名查找
+            origin_airports = AirportInfo.objects.filter(province=origin_province).values_list('code', flat=True)
+            if not origin_airports:
+                return Response({"error": f"找不到城市或省份 {origin_province} 的机场"}, status=404)
+            filters["origin__in"] = list(origin_airports)
+            print(f"🔍 起点省份 {origin_province} 的机场: {list(origin_airports)}")
+
+    # 处理终点城市/省份筛选
+    if dest_province != "全国":
+        # 首先尝试作为城市名查找
+        dest_codes = get_codes_by_city(dest_province)
+        if dest_codes:
+            # 找到了城市对应的机场代码
+            filters["destination__in"] = dest_codes
+            print(f"🔍 终点城市 {dest_province} 的机场: {dest_codes}")
+        else:
+            # 如果城市名没找到，尝试作为省份名查找
+            dest_airports = AirportInfo.objects.filter(province=dest_province).values_list('code', flat=True)
+            if not dest_airports:
+                return Response({"error": f"找不到城市或省份 {dest_province} 的机场"}, status=404)
+            filters["destination__in"] = list(dest_airports)
+            print(f"🔍 终点省份 {dest_province} 的机场: {list(dest_airports)}")
+
+    print(f"🔎 最终查询条件: {filters}")
+
+    # 查询数据
+    records = FlightMarketRecord.objects.filter(**filters).values(
+        'equipment', 'equipment_total_flights', 'equipment_total_seats'
+    )
+
+    print(f"📦 查询到记录数: {records.count()}")
+
+    if not records.exists():
+        return Response({
+            "equipment_distribution": [],
+            "fleet_distribution": []
+        })
+
+    # 1. 机型占比统计
+    equipment_stats = {}
+    for record in records:
+        equipment = record['equipment']
+        flights = float(record['equipment_total_flights'] or 0)
+
+        if equipment not in equipment_stats:
+            equipment_stats[equipment] = 0
+        equipment_stats[equipment] += flights
+
+    # 计算总航班数
+    total_flights = sum(equipment_stats.values())
+
+    # 构建机型分布数据
+    equipment_distribution = []
+    for equipment, flights in equipment_stats.items():
+        if total_flights > 0:
+            percentage = round((flights / total_flights) * 100, 2)
+            equipment_distribution.append({
+                "equipment": equipment,
+                "flights": int(flights),
+                "percentage": percentage
+            })
+
+    # 按航班数排序
+    equipment_distribution.sort(key=lambda x: x['flights'], reverse=True)
+
+    # 2. 机队分布统计（基于平均座位数）
+    fleet_mapping = {
+        "大型涡扇支线客机": 76,
+        "小型窄体客机": 117,
+        "中型窄体客机": 155,
+        "大型窄体客机": 180,
+        "小型宽体客机": 280,
+        "中型宽体客机": 334,
+        "大型宽体客机": 412
+    }
+
+    # 重新查询数据用于机队统计
+    records_for_fleet = FlightMarketRecord.objects.filter(**filters).values(
+        'equipment_total_flights', 'equipment_total_seats'
+    )
+
+    fleet_stats = {}
+    for record in records_for_fleet:
+        flights = float(record['equipment_total_flights'] or 0)
+        seats = float(record['equipment_total_seats'] or 0)
+
+        if flights > 0 and seats > 0:
+            avg_seats = seats / flights
+
+            # 根据平均座位数确定机队类型
+            fleet_type = None
+            for fleet_name, threshold in fleet_mapping.items():
+                if avg_seats <= threshold:
+                    fleet_type = fleet_name
+                    break
+
+            # 如果超过最大阈值，归类为大型宽体客机
+            if fleet_type is None:
+                fleet_type = "大型宽体客机"
+
+            if fleet_type not in fleet_stats:
+                fleet_stats[fleet_type] = 0
+            fleet_stats[fleet_type] += flights
+
+    # 构建机队分布数据
+    fleet_distribution = []
+    total_fleet_flights = sum(fleet_stats.values())
+
+    for fleet_type, flights in fleet_stats.items():
+        if total_fleet_flights > 0:
+            percentage = round((flights / total_fleet_flights) * 100, 2)
+            fleet_distribution.append({
+                "fleet_type": fleet_type,
+                "flights": int(flights),
+                "percentage": percentage
+            })
+
+    # 按航班数排序
+    fleet_distribution.sort(key=lambda x: x['flights'], reverse=True)
+
+    result = {
+        "equipment_distribution": equipment_distribution,
+        "fleet_distribution": fleet_distribution
+    }
+
+    print(f"✅ 返回机型数据: 机型分布 {len(equipment_distribution)} 种, 机队分布 {len(fleet_distribution)} 种")
     return Response(result)
