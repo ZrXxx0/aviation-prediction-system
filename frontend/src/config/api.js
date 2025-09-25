@@ -38,9 +38,17 @@ const API_ENDPOINTS = {
   },
   // 预测相关API
   PREDICT: {
-    FORECAST: '/predict/forecast/',
+    MODELS: '/predict/forecast/models/',
+    FORECAST: '/predict/forecast/run/',
+    PRETRAIN: '/predict/pretrain/pretrain/',
     MODEL_STATUS: '/predict/model-status/',
+    TRAIN: '/predict/formal/train/',
+    FLIGHTDATA: '/predict/data/get_flightdata/',
   },
+  // // 数据管理API
+  // MANAGEMENT: {
+  //   FLIGHTDATA: '/predict/data/get_flightdata/',
+  // },
   // 其他API端点可以在这里添加
 };
 

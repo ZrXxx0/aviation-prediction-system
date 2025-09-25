@@ -136,6 +136,7 @@
 </template>
 
 <script setup>
+import apiConfig from '@/config/api.js';
 import { ref, reactive, computed, onMounted } from 'vue'
 
 const activeTab = ref('query')
@@ -232,7 +233,9 @@ async function searchData() {
       params.append('end_date', queryForm.dateRange[1]);
     }
 
-    const url = `http://localhost:8000/predict/data/get_flightdata/?${params.toString()}`
+    // const url = `http://localhost:8000/predict/data/get_flightdata/?${params.toString()}`
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.FLIGHTDATA) + `?${params.toString()}`
+    console.log('请求 URL:', url)
     const res = await fetch(url)
     const result = await res.json()
 

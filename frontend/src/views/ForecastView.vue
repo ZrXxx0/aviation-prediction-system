@@ -521,6 +521,7 @@
 import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
+import apiConfig from '@/config/api.js';
 import * as XLSX from 'xlsx'
 
 // 城市和省份数据结构
@@ -608,7 +609,8 @@ async function fetchModels(granularity) {
     const destinationIATA = selectedTo.value[2]
 
     // 接口 URL
-    const url = `http://localhost:8000/predict/forecast/models/`
+    // const url = `http://localhost:8000/predict/forecast/models/`
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.MODELS)
     const res = await axios.get(url, {
       params: {
         origin_airport: originIATA,
@@ -846,7 +848,8 @@ async function runForecast() {
     }
 
     console.log('预测请求参数:', payload)
-    const url = 'http://localhost:8000/predict/forecast/run/'
+    // const url = 'http://localhost:8000/predict/forecast/run/'
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.FORECAST)
     const res = await axios.post(url, payload) 
     console.log('预测返回结果:', res)
 
@@ -1048,7 +1051,8 @@ async function loadHistoryPredictions(origin, destination, granularity) {
   }
   const granularityEn = granularityMap[granularity] || 'monthly'
   try {
-    const url = 'http://localhost:8000/predict/forecast/models/'
+    // const url = 'http://localhost:8000/predict/forecast/models/'
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.MODELS)
     const res = await axios.get(url, {
       params: {
         origin_airport: origin,
@@ -1140,7 +1144,8 @@ async function startTraining() {
     console.log("训练请求 payload:", payload)
 
     // 发请求
-    const res = await fetch('http://localhost:8000/predict/pretrain/model/', {
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.PRETRAIN)
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
@@ -1176,8 +1181,9 @@ async function saveModel() {
     }
     console.log("保存模型请求 payload:", payload)
     // 发送保存请求
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.TRAIN)
     const response = await axios.post(
-      "http://localhost:8000/predict/formal/train/",
+      url,
       payload
     )
 
