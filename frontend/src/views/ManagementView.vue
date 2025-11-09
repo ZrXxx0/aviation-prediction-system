@@ -1,7 +1,7 @@
 <template>
   <div class="manage-container">
     <el-tabs v-model="activeTab" type="card" stretch>
-      
+
       <!-- 数据查询 Tab -->
       <el-tab-pane label="数据查询" name="query">
         <div class="query-panel">
@@ -47,36 +47,63 @@
 
           <!-- 查询结果 -->
           <div class="query-table" v-if="tableData.length">
-            <el-table :data="tableData" border stripe style="width: 100%">
-              <el-table-column prop="origin" label="起点机场" min-width="100"/>
-              <el-table-column prop="destination" label="终点机场" min-width="100"/>
-              <el-table-column prop="date" label="时间" min-width="120"/>
-              <el-table-column prop="capacity" label="运力" min-width="100"/>
-              <el-table-column prop="passengers" label="运量" min-width="100"/>
-              <el-table-column prop="flights" label="航班数" min-width="100"/>
-            </el-table>
-
             <div class="toolbar">
-              <el-pagination
-                background
-                layout="prev, pager, next, sizes, total"
-                :page-sizes="[10, 20, 50, 100]"
-                :page-size="pagination.pageSize"
-                :current-page="pagination.currentPage"
-                :total="pagination.total"
-                @size-change="handleSizeChange"
-                @current-change="handleCurrentChange"
-                class="pagination"
-              />
-
-              <el-button
-                type="success"
-                @click="exportData"
-                class="export-btn"
+              <el-popover
+                placement="bottom"
+                trigger="click"
+                width="250px"
               >
-                导出查询结果
-              </el-button>
+                <template #reference>
+                  <el-button type="primary" size="small">选择显示列</el-button>
+                </template>
+
+                <el-checkbox-group v-model="selectedColumns" class="column-list">
+                  <el-checkbox
+                    v-for="col in allColumns"
+                    :key="col"
+                    :label="col"
+                  >
+                    {{ col }}
+                  </el-checkbox>
+                </el-checkbox-group>
+
+                <div style="text-align: right; margin-top: 10px;">
+                  <el-button size="small" @click="selectAllColumns">全选</el-button>
+                  <el-button size="small" @click="clearAllColumns">清空</el-button>
+                </div>
+              </el-popover>
+
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <el-pagination
+                  background
+                  layout="prev, pager, next, sizes, total"
+                  :page-sizes="[10, 20, 50, 100]"
+                  :page-size="pagination.pageSize"
+                  :current-page="pagination.currentPage"
+                  :total="pagination.total"
+                  @size-change="handleSizeChange"
+                  @current-change="handleCurrentChange"
+                  class="pagination"
+                />
+                <el-button
+                  type="success"
+                  @click="exportData"
+                  class="export-btn"
+                >
+                  导出查询结果
+                </el-button>
+              </div>
             </div>
+
+            <el-table :data="tableData" border stripe style="width: 100%">
+              <el-table-column
+                v-for="col in selectedColumns"
+                :key="col"
+                :prop="col"
+                :label="col"
+                min-width="100"
+              />
+            </el-table>
           </div>
 
           <div v-else class="empty-data">
@@ -136,8 +163,8 @@
 </template>
 
 <script setup>
-import apiConfig from '@/config/api.js';
-import { ref, reactive, computed, onMounted } from 'vue'
+import apiConfig from '@/config/api.js'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 
 const activeTab = ref('query')
 const fileList = ref([])
@@ -157,6 +184,27 @@ const pagination = reactive({
   total: 0
 })
 
+// 动态列控制
+const allColumns = ref([])
+const selectedColumns = ref([])
+
+watch(tableData, (val) => {
+  if (val.length > 0) {
+    allColumns.value = Object.keys(val[0])
+    if (selectedColumns.value.length === 0) {
+      selectedColumns.value = [...allColumns.value]
+    }
+  }
+})
+
+function selectAllColumns() {
+  selectedColumns.value = [...allColumns.value]
+}
+
+function clearAllColumns() {
+  selectedColumns.value = []
+}
+
 const locationOptions = ref([])
 const cascaderProps = {
   expandTrigger: 'hover',
@@ -167,9 +215,9 @@ const cascaderProps = {
   children: 'children'
 }
 
-// 过滤终点机场，避免选择和起点相同
 const filteredDestinationOptions = computed(() => {
-  if (!queryForm.originCity?.length || queryForm.originCity.length !== 3) return locationOptions.value
+  if (!queryForm.originCity?.length || queryForm.originCity.length !== 3)
+    return locationOptions.value
   const [originProvince, originCity, originIATA] = queryForm.originCity
   return locationOptions.value.map(province => ({
     ...province,
@@ -188,20 +236,17 @@ async function loadAirportData() {
 
     const provinceMap = {}
 
-    // 遍历 JSON 构造层级结构
     Object.entries(data).forEach(([iata, info]) => {
       const { province, city, airport } = info
-
       if (!provinceMap[province]) provinceMap[province] = {}
       if (!provinceMap[province][city]) provinceMap[province][city] = []
 
       provinceMap[province][city].push({
-        label: airport,   // 前端显示机场名称
-        value: iata       // 最终传给后端的三字码
+        label: airport,
+        value: iata
       })
     })
 
-    // 转换成 Cascader 所需格式
     locationOptions.value = Object.entries(provinceMap).map(([province, cities]) => ({
       label: province,
       value: province,
@@ -220,20 +265,18 @@ async function loadAirportData() {
 // 查询
 async function searchData() {
   try {
-    const params = new URLSearchParams();
+    const params = new URLSearchParams()
 
     if (queryForm.originCity?.length === 3)
-      params.append('origin', queryForm.originCity[2]);
+      params.append('origin', queryForm.originCity[2])
     if (queryForm.destinationCity?.length === 3)
-      params.append('destination', queryForm.destinationCity[2]);
+      params.append('destination', queryForm.destinationCity[2])
 
     if (queryForm.dateRange?.length === 2) {
-      // 直接使用 picker 返回的字符串
-      params.append('start_date', queryForm.dateRange[0]);
-      params.append('end_date', queryForm.dateRange[1]);
+      params.append('start_date', queryForm.dateRange[0])
+      params.append('end_date', queryForm.dateRange[1])
     }
 
-    // const url = `http://localhost:8000/predict/data/get_flightdata/?${params.toString()}`
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.FLIGHTDATA) + `?${params.toString()}`
     console.log('请求 URL:', url)
     const res = await fetch(url)
@@ -246,7 +289,6 @@ async function searchData() {
 
     const rawData = result.data || []
 
-    // 前端分页
     pagination.total = rawData.length
     const start = (pagination.currentPage - 1) * pagination.pageSize
     const end = pagination.currentPage * pagination.pageSize
@@ -259,20 +301,20 @@ async function searchData() {
       passengers: item.route_total_flights,
       flights: item.route_total_flights
     }))
-
   } catch (error) {
     console.error('查询失败:', error)
     alert('查询失败，请检查网络或后端服务')
   }
 }
 
-//重置
+// 重置
 function resetQuery() {
   queryForm.originCity = []
   queryForm.destinationCity = []
   queryForm.dateRange = []
   tableData.value = []
   pagination.currentPage = 1
+  selectedColumns.value = []
 }
 
 // 分页事件
@@ -285,11 +327,22 @@ function handleCurrentChange(page) {
   searchData()
 }
 
-// 导出 CSV
+// 导出 CSV（仅导出选中列）
 function exportData() {
   if (!tableData.value.length) return
-  const headers = Object.keys(tableData.value[0]).join(',')
-  const csvContent = [headers, ...tableData.value.map(r => Object.values(r).join(','))].join('\n')
+  if (!selectedColumns.value.length) {
+    alert('请先选择要导出的列')
+    return
+  }
+
+  const headers = selectedColumns.value.join(',')
+  const csvContent = [
+    headers,
+    ...tableData.value.map(row =>
+      selectedColumns.value.map(col => row[col]).join(',')
+    )
+  ].join('\n')
+
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
@@ -310,7 +363,7 @@ function downloadTemplate() {
   URL.revokeObjectURL(link.href)
 }
 
-// 上传文件校验
+// 上传文件校验与预览
 function beforeUpload(file) {
   const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv')
   const isLt5M = file.size / 1024 / 1024 < 5
@@ -346,89 +399,117 @@ onMounted(() => { loadAirportData() })
 </script>
 
 <style scoped>
+
 .manage-container {
-  padding: 1rem 2rem;
+  padding: 2rem 2.5rem;
   max-width: 1600px;
   margin: 0 auto;
+  background-color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
-.query-panel, .data-manage-panel {
-  padding: 20px 10px;
+/* 查询区域 */
+.query-panel {
+  padding: 24px 20px 32px 20px;
+  background-color: #fafafa;
+  border-radius: 8px;
+  margin-bottom: 24px;
 }
 
+/* 表单行间距 */
 .el-form-item {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
-.el-cascader, .el-date-picker {
-  width: 220px;
+/* 输入组件统一宽度 */
+.el-cascader,
+.el-date-picker {
+  width: 240px;
 }
 
-/* 按钮统一样式，文字居中 */
-.el-button {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 14px;
-  height: 32px;
-  padding: 0 16px;
-  line-height: normal;
+/* 查询与重置按钮放在一行右对齐 */
+.el-form-item:last-child {
+  margin-left: auto;
 }
 
-/* 表格间距 */
-.query-table, .preview-table {
-  margin-top: 20px;
-}
-
-/* 空数据样式 */
-.empty-data {
-  margin-top: 50px;
-  text-align: center;
-}
-
-/* 预览表格标题 */
-.preview-table h4 {
-  font-size: 16px;
-  font-weight: 500;
-  margin-bottom: 15px;
-}
-
-/* 表格字体大小 */
-.el-table th, .el-table td {
-  text-align: center;
-  font-size: 14px;
-  height: 40px;
-}
-
-/* 查询结果容器间距 */
+/* 表格容器 */
 .query-table {
-  margin-top: 30px; /* 表格与上方表单间距增大 */
+  margin-top: 24px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.05);
 }
 
-/* 分页栏间距 */
-.query-table .el-pagination {
-  margin-top: 20px; /* 分页栏与表格间距增大 */
-  text-align: right;
-}
-
-/* 导出按钮间距 */
-.query-table .export-btn {
-  margin-top: 20px; /* 按钮与分页栏间距增大 */
-}
-
+/* 工具栏布局 */
 .toolbar {
   display: flex;
-  justify-content: space-between; /* 两端对齐 */
-  align-items: center;            /* 垂直居中 */
-  margin-top: 16px;               /* 上边距，可按需调整 */
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
 }
 
+/* 分页与导出按钮 */
 .pagination {
-  flex-shrink: 0; /* 避免被压缩 */
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .export-btn {
-  flex-shrink: 0;
+  height: 32px;
+}
+
+/* 表格美化 */
+.el-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.el-table th,
+.el-table td {
+  text-align: center;
+  font-size: 14px;
+  height: 42px;
+}
+
+/* 空数据 */
+.empty-data {
+  margin-top: 60px;
+  text-align: center;
+}
+
+/* 上传部分 */
+.data-manage-panel {
+  padding: 30px 20px;
+  background-color: #fafafa;
+  border-radius: 8px;
+}
+
+.download-btn {
+  margin-bottom: 20px;
+}
+
+/* 上传区提示样式 */
+.upload-demo {
+  margin-bottom: 20px;
+}
+
+/* 预览表格 */
+.preview-table {
+  margin-top: 20px;
+  background: #fff;
+  border-radius: 8px;
+  padding: 16px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.05);
+}
+
+.preview-table h4 {
+  font-size: 16px;
+  font-weight: 500;
+  margin-bottom: 12px;
 }
 
 </style>
