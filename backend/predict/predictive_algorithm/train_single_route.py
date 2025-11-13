@@ -152,13 +152,13 @@ def train_single_route(origin, destination, config=None):
                 f.write(test_evaluator.report("Test", return_str=True))
         
         # 特征重要性
-        print("生成特征重要性图...")
-        if config["model_type"] == "lgb":
-            lgb.plot_importance(model, max_num_features=20)
-        else:
-            xgb.plot_importance(model, max_num_features=20)
-        plt.savefig(os.path.join(route_dir, "feature_importance.png"))
-        plt.close()
+        # print("生成特征重要性图...")
+        # if config["model_type"] == "lgb":
+        #     lgb.plot_importance(model, max_num_features=20)
+        # else:
+        #     xgb.plot_importance(model, max_num_features=20)
+        # plt.savefig(os.path.join(route_dir, "feature_importance.png"))
+        # plt.close()
 
         # 使用全部数据重新训练
         print("使用全部数据重新训练模型...")
@@ -271,51 +271,51 @@ def train_single_route(origin, destination, config=None):
         result_df.to_csv(os.path.join(route_dir, "prediction_results.csv"), index=False)
         
         # 可视化结果
-        if config["plot_results"]:
-            print("生成预测结果图...")
-            plt.figure(figsize=(14, 6))
-            plt.plot(result_df['YearMonth'], result_df['Actual'], label='实际值', color='black')
-            
-            # 训练集预测
-            train_mask = result_df['Set'] == 'Train'
-            plt.plot(
-                result_df[train_mask]['YearMonth'], 
-                result_df[train_mask]['Predicted'], 
-                label='训练集预测', linestyle='--', color='blue'
-            )
-            
-            # 测试集预测
-            if not test_df.empty:
-                test_mask = result_df['Set'] == 'Test'
-                plt.plot(
-                    result_df[test_mask]['YearMonth'], 
-                    result_df[test_mask]['Predicted'], 
-                    label='测试集预测', linestyle='--', color='red', 
-                    marker='o', markersize=3
-                )
-            
-            # 未来预测
-            future_mask = result_df['Set'] == 'Future'
-            plt.plot(
-                result_df[future_mask]['YearMonth'], 
-                result_df[future_mask]['Predicted'], 
-                label='未来预测', linestyle='--', color='green'
-            )
-            
-            # 添加分割线
-            if not test_df.empty:
-                split_date = test_df['YearMonth'].min()
-                plt.axvline(x=split_date, color='gray', linestyle=':', label='训练/测试分割线')
-            
-            plt.title(f"航线座位预测: {origin} → {destination}")
-            plt.xlabel("日期")
-            plt.ylabel("座位数")
-            plt.legend()
-            plt.grid(True)
-            plt.xticks(rotation=45)
-            plt.tight_layout()
-            plt.savefig(os.path.join(route_dir, "forecast_plot.png"))
-            plt.close()
+        # if config["plot_results"]:
+        #     print("生成预测结果图...")
+        #     plt.figure(figsize=(14, 6))
+        #     plt.plot(result_df['YearMonth'], result_df['Actual'], label='实际值', color='black')
+        #
+        #     # 训练集预测
+        #     train_mask = result_df['Set'] == 'Train'
+        #     plt.plot(
+        #         result_df[train_mask]['YearMonth'],
+        #         result_df[train_mask]['Predicted'],
+        #         label='训练集预测', linestyle='--', color='blue'
+        #     )
+        #
+        #     # 测试集预测
+        #     if not test_df.empty:
+        #         test_mask = result_df['Set'] == 'Test'
+        #         plt.plot(
+        #             result_df[test_mask]['YearMonth'],
+        #             result_df[test_mask]['Predicted'],
+        #             label='测试集预测', linestyle='--', color='red',
+        #             marker='o', markersize=3
+        #         )
+        #
+        #     # 未来预测
+        #     future_mask = result_df['Set'] == 'Future'
+        #     plt.plot(
+        #         result_df[future_mask]['YearMonth'],
+        #         result_df[future_mask]['Predicted'],
+        #         label='未来预测', linestyle='--', color='green'
+        #     )
+        #
+        #     # 添加分割线
+        #     if not test_df.empty:
+        #         split_date = test_df['YearMonth'].min()
+        #         plt.axvline(x=split_date, color='gray', linestyle=':', label='训练/测试分割线')
+        #
+        #     plt.title(f"航线座位预测: {origin} → {destination}")
+        #     plt.xlabel("日期")
+        #     plt.ylabel("座位数")
+        #     plt.legend()
+        #     plt.grid(True)
+        #     plt.xticks(rotation=45)
+        #     plt.tight_layout()
+        #     plt.savefig(os.path.join(route_dir, "forecast_plot.png"))
+        #     plt.close()
         
         print(f"√ 航线 {origin}-{destination} 训练完成!")
         print(f"结果保存在: {route_dir}")

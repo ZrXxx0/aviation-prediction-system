@@ -221,6 +221,7 @@ def predict_single_route(prediction_request):
         })
 
     # 返回结果
+    print("预测成功~")
     return {
         'model_info': model_info_response,
         'prediction_results': {

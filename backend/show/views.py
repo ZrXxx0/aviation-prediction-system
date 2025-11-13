@@ -463,10 +463,6 @@ def statistics_trend_view(request):
     # 检查数据库中是否有数据
     total_count = RouteMonthlyStat.objects.count()
     print(f"🔍 数据库中总记录数: {total_count}")
-    
-    # 检查2024年6月的数据
-    june_2024_count = RouteMonthlyStat.objects.filter(year=2024, month=6).count()
-    print(f"🔍 2024年6月数据数量: {june_2024_count}")
 
     # 城市筛选
     if start_city:

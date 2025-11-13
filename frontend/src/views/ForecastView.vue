@@ -475,7 +475,15 @@
             </template>
           </el-table-column>
         </el-table>
-        <div style="text-align:right;">
+        <div style="text-align:right; display: flex; gap: 12px; justify-content: flex-end;">
+          <el-button type="success" @click="downloadReport" :disabled="!reportPdfPath" style="margin-top:16px;">
+            <el-icon><Download /></el-icon>
+            下载训练报告
+          </el-button>
+          <el-button type="info" @click="downloadData" :disabled="!dataPath" style="margin-top:16px;">
+            <el-icon><Download /></el-icon>
+            下载数据文件
+          </el-button>
           <el-button type="primary" @click="saveModel" :loading="savingModel" style="margin-top:16px;">保存模型</el-button>
         </div>
       </div>
@@ -523,6 +531,7 @@ import * as echarts from 'echarts'
 import axios from 'axios'
 import apiConfig from '@/config/api.js';
 import * as XLSX from 'xlsx'
+import { Download } from '@element-plus/icons-vue'
 
 // 城市和省份数据结构
 const locationOptions = ref([])
@@ -611,6 +620,7 @@ async function fetchModels(granularity) {
     // 接口 URL
     // const url = `http://localhost:8000/predict/forecast/models/`
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.MODELS)
+    console.log('请求模型接口:', url, originIATA, destinationIATA, granularity)
     const res = await axios.get(url, {
       params: {
         origin_airport: originIATA,
@@ -619,6 +629,7 @@ async function fetchModels(granularity) {
       },
       timeout: 10000 // 设置超时时间为 10 秒
     })
+    console.log('获取模型响应:', res.data)
 
     if (res.data.success) {
       return res.data.data.models
@@ -970,6 +981,8 @@ const savingModel = ref(false)
 const showDetailDialog = ref(false)
 const detailModel = ref(null)
 const pretrainModelId = ref(null)
+const reportPdfPath = ref('')
+const dataPath = ref('')
 
 // 显示模型详情
 function showModelDetail(row) {
@@ -1145,6 +1158,7 @@ async function startTraining() {
 
     // 发请求
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.PRETRAIN)
+    console.log('训练请求 URL:', url)
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1162,8 +1176,13 @@ async function startTraining() {
     // 假设后端返回 { success:true, results:[{date, model, mae, mape, rmse}, ...] }
     evaluationResults.value = result.training_result ? [result.training_result] : []
     pretrainModelId.value = result.record_id || null
+    // 保存文件路径 - 从download_urls对象中获取
+    reportPdfPath.value = result.download_urls?.report_pdf || ''
+    dataPath.value = result.download_urls?.data_path || ''
     console.log('评估结果:', evaluationResults.value)
     console.log('预训练记录 ID:', pretrainModelId.value)
+    console.log('报告PDF路径:', reportPdfPath.value)
+    console.log('数据文件路径:', dataPath.value)
   } catch (error) {
     alert('训练失败')
   } finally {
@@ -1197,6 +1216,85 @@ async function saveModel() {
     alert('请求出错，无法保存模型')
   } finally {
     savingModel.value = false
+  }
+}
+
+// 下载训练报告
+async function downloadReport() {
+  if (!reportPdfPath.value) {
+    alert('没有可下载的训练报告')
+    return
+  }
+  
+  try {
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.DOWNLOAD_TRAIN_FILE)
+    console.log('下载报告URL:', url)
+    console.log('文件路径:', reportPdfPath.value)
+    console.log('文件类型:', 'report_pdf')
+    
+    // 使用POST请求下载文件
+    const response = await axios.post(url, {
+      file_path: reportPdfPath.value,
+      file_type: 'report_pdf'
+    }, {
+      responseType: 'blob' // 重要：指定响应类型为blob
+    })
+    
+    // 创建blob URL并下载
+    const blob = new Blob([response.data], { type: 'application/pdf' })
+    const blobUrl = window.URL.createObjectURL(blob)
+    
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = `训练报告_${new Date().getTime()}.pdf`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    // 清理blob URL
+    window.URL.revokeObjectURL(blobUrl)
+  } catch (error) {
+    console.error('下载训练报告失败:', error)
+    alert('下载训练报告失败: ' + error.message)
+  }
+}
+
+// 下载数据文件
+async function downloadData() {
+  if (!dataPath.value) {
+    alert('没有可下载的数据文件')
+    return
+  }
+  
+  try {
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.DOWNLOAD_TRAIN_FILE)
+    console.log('下载数据URL:', url)
+    console.log('文件路径:', dataPath.value)
+    
+    // 使用POST请求下载文件
+    const response = await axios.post(url, {
+      file_path: dataPath.value,
+      file_type: 'data_with_features'
+    }, {
+      responseType: 'blob' // 重要：指定响应类型为blob
+    })
+    
+    // 创建blob URL并下载
+    const blob = new Blob([response.data], { type: 'text/csv' })
+    const blobUrl = window.URL.createObjectURL(blob)
+    
+    const link = document.createElement('a')
+    link.href = blobUrl
+    link.download = `数据文件_${new Date().getTime()}.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    
+    // 清理blob URL
+    window.URL.revokeObjectURL(blobUrl)
+  } catch (error) {
+    console.error('下载数据文件失败:', error)
+    alert('下载数据文件失败: ' + error.message)
   }
 }
 

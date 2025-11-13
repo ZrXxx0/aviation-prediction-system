@@ -1,0 +1,138 @@
+{
+  "info": {
+    "name": "航空预测系统API测试",
+    "description": "用于测试航空预测系统的API端点",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "下载训练报告",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"file_path\": \"monthly_lgb/CAN_PEK_20250101120000/report.pdf\",\n  \"file_type\": \"report_pdf\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/predict/train_file/save_locate/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "predict",
+            "train_file",
+            "save_locate",
+            ""
+          ]
+        },
+        "description": "测试下载训练报告功能"
+      },
+      "response": []
+    },
+    {
+      "name": "下载数据文件",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json",
+            "type": "text"
+          },
+          {
+            "key": "Accept",
+            "value": "application/json",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"file_path\": \"monthly_lgb/CAN_PEK_20250101120000/features.csv\",\n  \"file_type\": \"data_with_features\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{base_url}}/predict/train_file/save_locate/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "predict",
+            "train_file",
+            "save_locate",
+            ""
+          ]
+        },
+        "description": "测试下载数据文件功能"
+      },
+      "response": []
+    },
+    {
+      "name": "测试服务器连接",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/admin/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "admin",
+            ""
+          ]
+        },
+        "description": "测试Django服务器是否正常运行"
+      },
+      "response": []
+    },
+    {
+      "name": "测试预测模型列表",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/predict/forecast/models/",
+          "host": [
+            "{{base_url}}"
+          ],
+          "path": [
+            "predict",
+            "forecast",
+            "models",
+            ""
+          ]
+        },
+        "description": "测试获取预测模型列表"
+      },
+      "response": []
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    }
+  ]
+}

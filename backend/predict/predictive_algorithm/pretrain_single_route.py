@@ -7,11 +7,14 @@ import matplotlib.pyplot as plt
 import json
 from datetime import datetime, timedelta
 import time
+import platform
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import inch
 from reportlab.lib import colors
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 
 from .time_granularity import TimeGranularityController
 from .TS_model import ARIMAModel
@@ -35,6 +38,325 @@ warnings.filterwarnings("ignore")
 
 plt.rcParams['font.sans-serif'] = ['SimHei']
 plt.rcParams['axes.unicode_minus'] = False
+
+
+def register_chinese_font():
+    """
+    Register Chinese font, prioritize font files in project assets folder
+    """
+    try:
+        # Get current file directory
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # Font file path in project assets folder
+        project_font_path = os.path.join(current_dir, 'assets', 'simsunb.ttf')
+        print(project_font_path)
+
+        # Font path priority: project assets > system fonts
+        font_paths = [project_font_path]
+
+        # Add system fonts as alternatives
+        system = platform.system()
+
+        if system == "Windows":
+            font_paths.extend([
+                "C:/Windows/Fonts/simsun.ttc",  # SimSun
+                "C:/Windows/Fonts/simhei.ttf",  # SimHei
+                "C:/Windows/Fonts/msyh.ttc",  # Microsoft YaHei
+                "C:/Windows/Fonts/simkai.ttf",  # SimKai
+            ])
+        elif system == "Darwin":  # macOS
+            font_paths.extend([
+                "/System/Library/Fonts/PingFang.ttc",
+                "/System/Library/Fonts/STHeiti Light.ttc",
+                "/Library/Fonts/Arial Unicode MS.ttf",
+            ])
+        else:  # Linux
+            font_paths.extend([
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+            ])
+
+        # Try to register fonts
+        registered_font = False
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                try:
+                    # Use different font names to avoid conflicts
+                    font_name = 'ChineseFont_' + os.path.basename(font_path).replace('.', '_')
+                    pdfmetrics.registerFont(TTFont(font_name, font_path))
+                    print(f"Successfully registered Chinese font: {font_path} with name: {font_name}")
+                    registered_font = True
+                    break  # Exit after successful registration
+                except Exception as e:
+                    print(f"Failed to register font {font_path}: {e}")
+                    continue
+
+        # If all fonts fail to register, use default font
+        if not registered_font:
+            print("Warning: No available Chinese fonts found, using default font")
+            # Try to use built-in fonts
+            try:
+                # Use built-in Chinese font
+                from reportlab.pdfbase.cidfonts import UnicodeCIDFont
+                pdfmetrics.registerFont(UnicodeCIDFont('STSong-Light'))
+                print("Using built-in STSong-Light font")
+            except:
+                print("Cannot use built-in Chinese font, will use Helvetica")
+
+        return registered_font
+
+    except Exception as e:
+        print(f"Font registration process error: {e}")
+        return False
+
+
+def create_chinese_style(style_name, parent_style, font_name='Helvetica', **kwargs):
+    """
+    Create Chinese-supported style
+    """
+    styles = getSampleStyleSheet()
+
+    # Try to use registered Chinese fonts
+    try:
+        # Check if there are registered Chinese fonts
+        if 'ChineseFont' in pdfmetrics.getRegisteredFontNames():
+            font_name = 'ChineseFont'
+    except:
+        pass
+
+    # Create style
+    style = ParagraphStyle(
+        style_name,
+        parent=styles[parent_style],
+        fontName=font_name,
+        **kwargs
+    )
+
+    return style
+
+
+def generate_model_report(route_dir, origin, destination, time_granularity, model_type,
+                          train_metrics, test_metrics, training_samples, test_samples,
+                          feature_count, train_start_date, train_end_date, train_duration):
+    """
+    Generate model training report PDF
+
+    :param route_dir: Model save directory
+    :param origin: Origin airport code
+    :param destination: Destination airport code
+    :param time_granularity: Time granularity
+    :param model_type: Model type
+    :param train_metrics: Training set evaluation metrics
+    :param test_metrics: Test set evaluation metrics
+    :param training_samples: Training set sample count
+    :param test_samples: Test set sample count
+    :param feature_count: Feature count
+    :param train_start_date: Training data start date
+    :param train_end_date: Training data end date
+    :param train_duration: Training duration
+    :return: PDF file path
+    """
+    try:
+        # Register Chinese font
+        register_chinese_font()
+
+        # Create PDF filename
+        pdf_filename = f"model_report_{origin}_{destination}_{time_granularity}_{model_type}.pdf"
+        pdf_path = os.path.join(route_dir, pdf_filename)
+
+        # Create PDF document
+        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
+        story = []
+
+        # Get styles
+        styles = getSampleStyleSheet()
+
+        # Create Chinese-supported styles
+        title_style = create_chinese_style(
+            'CustomTitle',
+            'Heading1',
+            fontSize=18,
+            spaceAfter=30,
+            alignment=1,  # Center
+            textColor=colors.HexColor('#2E4057')  # Dark blue
+        )
+
+        heading_style = create_chinese_style(
+            'CustomHeading',
+            'Heading2',
+            fontSize=14,
+            spaceAfter=12,
+            spaceBefore=20,
+            textColor=colors.HexColor('#2E86AB')  # Blue
+        )
+
+        normal_style = create_chinese_style(
+            'CustomNormal',
+            'Normal',
+            fontSize=12,
+            textColor=colors.HexColor('#4A4A4A')  # Dark gray
+        )
+
+        # Title
+        story.append(Paragraph(f"Airline Prediction Model Training Report", title_style))
+        story.append(Spacer(1, 20))
+
+        # Basic information
+        story.append(Paragraph("Basic Information", heading_style))
+        basic_info = [
+            ["Route", f"{origin} → {destination}"],
+            ["Time Granularity", time_granularity],
+            ["Model Type", model_type.upper()],
+            ["Training Data Start Date", train_start_date.strftime('%Y-%m-%d')],
+            ["Training Data End Date", train_end_date.strftime('%Y-%m-%d')],
+            ["Training Duration", str(train_duration)],
+            ["Feature Count", str(feature_count)],
+            ["Training Samples", str(training_samples)],
+            ["Test Samples", str(test_samples)]
+        ]
+
+        # Style the table
+        basic_table = Table(basic_info, colWidths=[2 * inch, 3 * inch])
+        basic_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#2E86AB')),  # Blue header
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),  # Use Helvetica to avoid Chinese issues
+            ('FONTSIZE', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8F9FA')),  # Light gray background
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F8F9FA')]),  # Alternating row background
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D1D1'))  # Light gray grid
+        ]))
+        story.append(basic_table)
+        story.append(Spacer(1, 20))
+
+        # Training set evaluation metrics
+        story.append(Paragraph("Training Set Evaluation Metrics", heading_style))
+        if train_metrics:
+            train_data = [
+                ["Metric", "Value"],
+                ["MAE (Mean Absolute Error)", f"{train_metrics.get('mae', 'N/A'):.4f}"],
+                ["RMSE (Root Mean Square Error)", f"{train_metrics.get('rmse', 'N/A'):.4f}"],
+                ["MAPE (Mean Absolute Percentage Error)", f"{train_metrics.get('mape', 'N/A'):.4f}%"],
+                ["R² (Coefficient of Determination)", f"{train_metrics.get('r2', 'N/A'):.4f}"]
+            ]
+            train_table = Table(train_data, colWidths=[2.5 * inch, 2.5 * inch])
+            train_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#A23B72')),  # Purple header
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8F9FA')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F8F9FA')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D1D1'))
+            ]))
+            story.append(train_table)
+        else:
+            story.append(Paragraph("No training set evaluation metrics", normal_style))
+        story.append(Spacer(1, 20))
+
+        # Test set evaluation metrics
+        if test_metrics and test_samples > 0:
+            story.append(Paragraph("Test Set Evaluation Metrics", heading_style))
+            test_data = [
+                ["Metric", "Value"],
+                ["MAE (Mean Absolute Error)", f"{test_metrics.get('mae', 'N/A'):.4f}"],
+                ["RMSE (Root Mean Square Error)", f"{test_metrics.get('rmse', 'N/A'):.4f}"],
+                ["MAPE (Mean Absolute Percentage Error)", f"{test_metrics.get('mape', 'N/A'):.4f}%"],
+                ["R² (Coefficient of Determination)", f"{test_metrics.get('r2', 'N/A'):.4f}"]
+            ]
+            test_table = Table(test_data, colWidths=[2.5 * inch, 2.5 * inch])
+            test_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#18A999')),  # Cyan header
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8F9FA')),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.HexColor('#FFFFFF'), colors.HexColor('#F8F9FA')]),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D1D1'))
+            ]))
+            story.append(test_table)
+            story.append(Spacer(1, 20))
+
+        # Performance summary
+        story.append(Paragraph("Performance Summary", heading_style))
+
+        # Evaluate based on R² value
+        r2_train = train_metrics.get('r2', 0) if train_metrics else 0
+        r2_test = test_metrics.get('r2', 0) if test_metrics else 0
+
+        if r2_train >= 0.9:
+            train_performance = "Excellent"
+            train_color = colors.HexColor('#28A745')  # Green
+        elif r2_train >= 0.7:
+            train_performance = "Good"
+            train_color = colors.HexColor('#17A2B8')  # Blue
+        elif r2_train >= 0.5:
+            train_performance = "Fair"
+            train_color = colors.HexColor('#FFC107')  # Yellow
+        else:
+            train_performance = "Needs Improvement"
+            train_color = colors.HexColor('#DC3545')  # Red
+
+        if test_samples > 0:
+            if r2_test >= 0.9:
+                test_performance = "Excellent"
+                test_color = colors.HexColor('#28A745')
+            elif r2_test >= 0.7:
+                test_performance = "Good"
+                test_color = colors.HexColor('#17A2B8')
+            elif r2_test >= 0.5:
+                test_performance = "Fair"
+                test_color = colors.HexColor('#FFC107')
+            else:
+                test_performance = "Needs Improvement"
+                test_color = colors.HexColor('#DC3545')
+        else:
+            test_performance = "No Test Data"
+            test_color = colors.HexColor('#6C757D')  # Gray
+
+        performance_data = [
+            ["Dataset", "R² Value", "Performance Rating"],
+            ["Training Set", f"{r2_train:.4f}", train_performance],
+            ["Test Set", f"{r2_test:.4f}" if test_samples > 0 else "N/A", test_performance]
+        ]
+
+        performance_table = Table(performance_data, colWidths=[2 * inch, 1.5 * inch, 2 * inch])
+        performance_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#6C757D')),  # Gray header
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#F8F9FA')),
+            ('TEXTCOLOR', (2, 1), (2, 1), train_color),
+            ('TEXTCOLOR', (2, 2), (2, 2), test_color),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#D1D1D1'))
+        ]))
+        story.append(performance_table)
+        story.append(Spacer(1, 20))
+
+        # Generation time
+        story.append(Paragraph(f"Report Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", normal_style))
+
+        # Build PDF
+        doc.build(story)
+        print(f"PDF report generated: {pdf_path}")
+        return pdf_path
+
+    except Exception as e:
+        print(f"Failed to generate PDF report: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return None
 
 
 def load_data_from_database(origin, destination):
@@ -102,149 +424,6 @@ def load_data_from_database(origin, destination):
         print(f"! 从数据库加载数据失败: {str(e)}")
         import traceback
         traceback.print_exc()
-        return None
-
-
-def generate_model_report(route_dir, origin, destination, time_granularity, model_type, 
-                         train_metrics, test_metrics, training_samples, test_samples, 
-                         feature_count, train_start_date, train_end_date, train_duration):
-    """
-    生成模型训练报告PDF
-    
-    :param route_dir: 模型保存目录
-    :param origin: 起始机场代码
-    :param destination: 目标机场代码
-    :param time_granularity: 时间粒度
-    :param model_type: 模型类型
-    :param train_metrics: 训练集评估指标
-    :param test_metrics: 测试集评估指标
-    :param training_samples: 训练集样本数
-    :param test_samples: 测试集样本数
-    :param feature_count: 特征数量
-    :param train_start_date: 训练数据开始日期
-    :param train_end_date: 训练数据结束日期
-    :param train_duration: 训练耗时
-    :return: PDF文件路径
-    """
-    try:
-        # 创建PDF文件名
-        pdf_filename = f"model_report_{origin}_{destination}_{time_granularity}_{model_type}.pdf"
-        pdf_path = os.path.join(route_dir, pdf_filename)
-        
-        # 创建PDF文档
-        doc = SimpleDocTemplate(pdf_path, pagesize=A4)
-        story = []
-        
-        # 获取样式
-        styles = getSampleStyleSheet()
-        title_style = ParagraphStyle(
-            'CustomTitle',
-            parent=styles['Heading1'],
-            fontSize=18,
-            spaceAfter=30,
-            alignment=1  # 居中
-        )
-        heading_style = ParagraphStyle(
-            'CustomHeading',
-            parent=styles['Heading2'],
-            fontSize=14,
-            spaceAfter=12,
-            spaceBefore=20
-        )
-        normal_style = styles['Normal']
-        
-        # 标题
-        story.append(Paragraph(f"航线预测模型训练报告", title_style))
-        story.append(Spacer(1, 20))
-        
-        # 基本信息
-        story.append(Paragraph("基本信息", heading_style))
-        basic_info = [
-            ["航线", f"{origin} → {destination}"],
-            ["时间粒度", time_granularity],
-            ["模型类型", model_type.upper()],
-            ["训练数据开始日期", train_start_date.strftime('%Y-%m-%d')],
-            ["训练数据结束日期", train_end_date.strftime('%Y-%m-%d')],
-            ["训练耗时", str(train_duration)],
-            ["特征数量", str(feature_count)],
-            ["训练集样本数", str(training_samples)],
-            ["测试集样本数", str(test_samples)]
-        ]
-        
-        basic_table = Table(basic_info, colWidths=[2*inch, 3*inch])
-        basic_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, 0), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-            ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-            ('GRID', (0, 0), (-1, -1), 1, colors.black)
-        ]))
-        story.append(basic_table)
-        story.append(Spacer(1, 20))
-        
-        # 训练集评估指标
-        story.append(Paragraph("训练集评估指标", heading_style))
-        if train_metrics:
-            train_data = [
-                ["指标", "值"],
-                ["MAE", f"{train_metrics.get('mae', 'N/A'):.4f}"],
-                ["RMSE", f"{train_metrics.get('rmse', 'N/A'):.4f}"],
-                ["MAPE", f"{train_metrics.get('mape', 'N/A'):.4f}%"],
-                ["R²", f"{train_metrics.get('r2', 'N/A'):.4f}"]
-            ]
-            train_table = Table(train_data, colWidths=[2*inch, 3*inch])
-            train_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 12),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
-            ]))
-            story.append(train_table)
-        else:
-            story.append(Paragraph("无训练集评估指标", normal_style))
-        story.append(Spacer(1, 20))
-        
-        # 测试集评估指标
-        if test_metrics and test_samples > 0:
-            story.append(Paragraph("测试集评估指标", heading_style))
-            test_data = [
-                ["指标", "值"],
-                ["MAE", f"{test_metrics.get('mae', 'N/A'):.4f}"],
-                ["RMSE", f"{test_metrics.get('rmse', 'N/A'):.4f}"],
-                ["MAPE", f"{test_metrics.get('mape', 'N/A'):.4f}%"],
-                ["R²", f"{test_metrics.get('r2', 'N/A'):.4f}"]
-            ]
-            test_table = Table(test_data, colWidths=[2*inch, 3*inch])
-            test_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 12),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
-            ]))
-            story.append(test_table)
-            story.append(Spacer(1, 20))
-        
-        # 生成时间
-        story.append(Paragraph(f"报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", normal_style))
-        
-        # 构建PDF
-        doc.build(story)
-        # print(f"PDF报告已生成: {pdf_path}")
-        return pdf_path
-        
-    except Exception as e:
-        print(f"生成PDF报告失败: {str(e)}")
         return None
 
 
@@ -398,7 +577,14 @@ def pretrain_single_route(origin, destination, config):
             test_preds = model.predict(X_test)
             test_evaluator = ModelEvaluator(y_test, test_preds)
 
+        # 保存data_with_features数据
+        print("保存特征工程后的数据...")
+        data_with_features_path = os.path.join(route_dir, "data_with_features.csv")
+        data_with_features.to_csv(data_with_features_path, index=False)
+        print(f"特征数据已保存到: {data_with_features_path}")
+
         # 保存评估结果
+        
         # print("保存评估结果...")
         with open(os.path.join(route_dir, "evaluation.txt"), "w", encoding='utf-8') as f:
             f.write("==== 训练集评估 ====\n")
@@ -471,6 +657,7 @@ def pretrain_single_route(origin, destination, config):
         # 计算相对于PRE_TRAINED_MODEL_DIR的相对路径
         meta_file_relative_path = os.path.relpath(os.path.join(route_dir, "metadata.json"), PRE_TRAINED_MODEL_DIR)
         report_pdf_relative_path = os.path.relpath(report_pdf_path, PRE_TRAINED_MODEL_DIR) if report_pdf_path else None
+        data_with_features_relative_path = os.path.relpath(data_with_features_path, PRE_TRAINED_MODEL_DIR)
         
         result_info = {
             "origin": origin,
@@ -491,6 +678,7 @@ def pretrain_single_route(origin, destination, config):
             "test_mape": test_evaluator.calculate_metrics().get('mape') if test_evaluator else None,
             "test_r2": test_evaluator.calculate_metrics().get('r2') if test_evaluator else None,
             "report_pdf": report_pdf_relative_path,
+            "data_with_features_path": data_with_features_relative_path,
             "success": True,
             "use_pretrain": False
         }

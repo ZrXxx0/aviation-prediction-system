@@ -1,14 +1,9 @@
 import json
 import os
 import django
-import sys
 
-# ========= Django 初始化 =========
-PROJECT_ROOT = r"D:\desk\project\backend"  # 项目根目录（manage.py 所在）
-sys.path.append(PROJECT_ROOT)
-
-import django
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "AirlinePredictSystem.settings")  # 改成你的 settings 模块
+# 设置 Django 环境
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'AirlinePredictSystem.settings')
 django.setup()
 
 from show.models import AirportInfo

@@ -7,10 +7,11 @@ from datetime import datetime
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
-from django.http import JsonResponse
+from django.http import JsonResponse, FileResponse
 from django.views.decorators.http import require_GET, require_POST
 from django.views.decorators.csrf import csrf_exempt
 from django.core.exceptions import ObjectDoesNotExist
+from django.utils import timezone
 from typing import Optional
 import copy
 
@@ -96,7 +97,7 @@ def clean_nan_values(data_dict):
     return cleaned_data
 
 # 获取预测模型函数
-@require_GET
+@api_view(['GET'])
 def get_forecast_models(request):
     """
     获取可用于预测的模型列表
@@ -216,8 +217,8 @@ def get_forecast_models(request):
         }, status=500)
 
 # 预测并返回结果函数+层级对齐
-@csrf_exempt  # 仅用于测试，避免403错误
-@require_POST
+@api_view(['POST'])
+@csrf_exempt
 def forecast_route_view(request):
     """
        批量预测航线座位数
@@ -292,6 +293,7 @@ def forecast_route_view(request):
     try:
         data = json.loads(request.body)
         predictions = data.get('predictions', [])
+        print("predictions", predictions)
         if not predictions:
             return JsonResponse({'error': '缺少预测请求', 'message': '请提供 predictions 数组'}, status=400)
 
@@ -587,7 +589,7 @@ def pretrain_model_request(request):
                 'test_rmse': result.get('test_rmse'),
                 'test_mape': result.get('test_mape'),
                 'test_r2': result.get('test_r2'),
-                'report_pdf': result.get('report_pdf', '')
+                'report_pdf': result.get('report_pdf')
             })
         else:
             # 训练失败，设置默认值
@@ -625,7 +627,11 @@ def pretrain_model_request(request):
             cleaned_result = clean_nan_values(result) if isinstance(result, dict) else result
             response_data.update({
                 'training_result': cleaned_result,
-                'message': f'航线 {origin}-{destination} 模型训练成功'
+                'message': f'航线 {origin}-{destination} 模型训练成功',
+                'download_urls': {
+                    'report_pdf': cleaned_result.get('report_pdf'),
+                    'data_path': cleaned_result.get('data_with_features_path')
+                }
             })
         else:
             response_data.update({
@@ -847,7 +853,7 @@ def formal_train_model(request):
 
 
 
-@require_GET
+@api_view(['GET'])
 def get_pretrain_models(request):
     """
     获取预训练成功的模型列表
@@ -958,7 +964,7 @@ def get_pretrain_models(request):
         }, status=500)
 
 
-
+@api_view(['GET'])
 def query_flight_market(request):
     """
     查询航线市场数据（直接查表，不做聚合，返回前1000条，按 year_month 升序）
@@ -1038,5 +1044,620 @@ def query_flight_market(request):
         }, status=500)
 
 
+@api_view(['POST'])
+@csrf_exempt
+def download_train_file(request):
+    """
+    下载文件接口
+
+    参数：
+    - file_path: 文件相对路径（相对于Pre_trained_Models目录）
+    - file_type: 文件类型 (report_pdf 或 data_with_features)
+
+    返回：
+    - 文件下载
+    """
+    print(f"下载接口被调用: {request.method}")
+    print(f"请求数据: {request.data}")
+    try:
+        # 获取参数，支持GET和POST请求
+        if request.method == 'GET':
+            file_path = request.GET.get('file_path')
+            file_type = request.GET.get('file_type', '')
+        else:  # POST请求
+            file_path = request.data.get('file_path')
+            file_type = request.data.get('file_type', '')
+
+        if not file_path:
+            return JsonResponse({
+                'error': '缺少必要参数',
+                'message': '请提供 file_path 参数'
+            }, status=400)
+
+        # 处理文件路径：将URL编码的反斜杠转换为正斜杠，然后转换为系统路径分隔符
+        # 首先解码URL编码
+        import urllib.parse
+        decoded_path = urllib.parse.unquote(file_path)
+        # 将正斜杠转换为系统路径分隔符
+        normalized_path = os.path.normpath(decoded_path.replace('/', os.sep))
+
+        # 构建完整文件路径
+        current_dir = os.path.dirname(os.path.abspath(__file__))  # backend/predict/
+        model_dir = os.path.join(os.path.dirname(current_dir), 'AirlineModels')  # backend/AirlineModels
+
+        # 预训练模型目录和已存在模型目录
+        pre_trained_model_dir = os.path.join(model_dir, 'Pre_trained_Models')
+
+        # 根据文件类型选择正确的目录
+        if file_type == 'data_with_features':
+            # 特征数据文件只在预训练目录
+            full_file_path = os.path.join(pre_trained_model_dir, normalized_path)
+        elif file_type == 'report_pdf':
+            full_file_path = os.path.join(pre_trained_model_dir, normalized_path)
+
+        # 检查文件是否存在
+        print(f"完整文件路径: {full_file_path}")
+        print(f"文件是否存在: {os.path.exists(full_file_path)}")
+        if not os.path.exists(full_file_path):
+            return JsonResponse({
+                'error': '文件不存在',
+                'message': f'文件不存在: {file_path}',
+                'full_path': full_file_path
+            }, status=404)
+
+        # 根据文件类型设置文件名和内容类型
+        if file_type == 'report_pdf':
+            filename = os.path.basename(file_path)
+            content_type = 'application/pdf'
+        elif file_type == 'data_with_features':
+            # 从路径中提取航线信息
+            path_parts = file_path.split(os.sep)
+            if len(path_parts) >= 3:
+                route_info = path_parts[-2]  # 例如: CAN_PEK_20250101120000
+                filename = f"{route_info}_features.csv"
+            else:
+                filename = "features_data.csv"
+            content_type = 'text/csv'
+        else:
+            filename = os.path.basename(file_path)
+            content_type = 'application/octet-stream'
+
+        # 返回文件下载响应
+        try:
+            print(f"准备下载文件: {filename}")
+            print(f"文件大小: {os.path.getsize(full_file_path)} bytes")
+
+            file_handle = open(full_file_path, 'rb')
+            response = FileResponse(
+                file_handle,
+                as_attachment=True,
+                filename=filename,
+                content_type=content_type
+            )
+            # 设置响应头
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            print(f"文件响应已创建，准备返回")
+            return response
+        except Exception as file_error:
+            print(f"打开文件时发生错误: {str(file_error)}")
+            import traceback
+            traceback.print_exc()
+            return JsonResponse({
+                'error': '文件读取失败',
+                'message': f'无法读取文件: {str(file_error)}'
+            }, status=500)
+
+    except Exception as e:
+        print(f"下载文件时发生错误: {str(e)}")
+        import traceback
+        traceback.print_exc()
+
+        return JsonResponse({
+            'error': '系统异常',
+            'message': f'下载文件时发生系统异常: {str(e)}'
+        }, status=500)
 
 
+# views_flight_api.py
+
+import decimal
+from django.db import transaction
+from .utils_flight_import import parse_upload_file_for_preview, parse_csv_content
+
+def _to_decimal_or_none(v):
+    if v in (None, "", "null"):
+        return None
+    try:
+        return decimal.Decimal(str(v))
+    except Exception:
+        return None
+
+@csrf_exempt
+@require_POST
+def flight_market_upload_preview(request):
+    """
+    步骤1：上传文件
+    - 非冲突行：直接写库（新建）
+    - 冲突行：返回给前端，让用户选覆盖/跳过
+    """
+    upload_file = request.FILES.get("file")
+    if not upload_file:
+        return JsonResponse({"code": 400, "msg": "缺少文件(file)"}, status=400)
+
+    try:
+        all_rows = parse_upload_file_for_preview(upload_file)
+    except Exception as e:
+        return JsonResponse({"code": 500, "msg": f"解析失败: {e}"}, status=500)
+
+    conflict_rows = []
+    auto_created = 0
+
+    with transaction.atomic():
+        for row in all_rows:
+            data = row["data"]
+            ym = data.get("year_month")
+            origin = data.get("origin")
+            dest = data.get("destination")
+
+            if not row["has_conflict"]:
+                # 直接新建写库
+                obj = FlightMarketRecord()
+                # 系统管理的字段，不参与设置
+                excluded_fields = {"id", "created_at", "updated_at"}
+                for field_name, value in data.items():
+                    # 跳过系统管理的字段
+                    if field_name in excluded_fields:
+                        continue
+                    
+                    if field_name in ("year_month", "origin", "destination", "equipment", "region"):
+                        setattr(obj, field_name, value)
+                    elif field_name == "international_flight":
+                        if isinstance(value, bool):
+                            setattr(obj, field_name, value)
+                        else:
+                            setattr(obj, field_name, str(value).lower() == "true")
+                    else:
+                        setattr(obj, field_name, _to_decimal_or_none(value))
+                obj.save()
+                auto_created += 1
+            else:
+                # 冲突行先不动，丢到列表里返回前端
+                conflict_rows.append(row)
+
+    return JsonResponse({
+        "code": 0,
+        "msg": "ok",
+        "data": {
+            "auto_created": auto_created,   # 已直接导入多少条
+            "conflict_rows": conflict_rows  # 需要人工处理的冲突行
+        }
+    })
+
+@csrf_exempt
+@require_POST
+def flight_market_upload_commit(request):
+    """
+    步骤2：前端提交“冲突行 + action”
+    body: {
+      "rows": [
+        {
+          "action": "overwrite" | "skip",
+          "data": {...}
+        }, ...
+      ]
+    }
+    """
+    try:
+        body = json.loads(request.body.decode("utf-8"))
+    except Exception:
+        return JsonResponse({"code": 400, "msg": "请求体必须是 JSON"}, status=400)
+
+    rows = body.get("rows") or []
+    if not isinstance(rows, list):
+        return JsonResponse({"code": 400, "msg": "rows 必须是数组"}, status=400)
+
+    updated = 0
+    skipped = 0
+    objects_to_update = []
+    objects_to_create = []
+    now = timezone.now()
+
+    with transaction.atomic():
+        for row in rows:
+            action = row.get("action", "skip")
+            data = row.get("data") or {}
+            ym = data.get("year_month")
+            origin = data.get("origin")
+            dest = data.get("destination")
+
+            if action == "skip":
+                skipped += 1
+                continue
+
+            # 理论上必然存在，因为这是"冲突行"
+            obj = FlightMarketRecord.objects.filter(
+                year_month=ym,
+                origin=origin,
+                destination=dest,
+            ).first()
+            
+            excluded_fields = {"id", "created_at", "updated_at"}
+            
+            if not obj:
+                # 极端情况：中间被删了，那就当新建
+                obj = FlightMarketRecord()
+                is_new = True
+            else:
+                # 如果存在，保留 id 和 created_at
+                # updated_at 需要手动设置为当前时间（因为 bulk_update 不会自动更新 auto_now 字段）
+                is_new = False
+
+            # 覆盖所有字段（排除 id, created_at, updated_at，这些字段由系统管理）
+            for field_name, value in data.items():
+                # 跳过系统管理的字段
+                if field_name in excluded_fields:
+                    continue
+                    
+                if field_name in ("year_month", "origin", "destination", "equipment", "region"):
+                    setattr(obj, field_name, value)
+                elif field_name == "international_flight":
+                    if isinstance(value, bool):
+                        setattr(obj, field_name, value)
+                    else:
+                        setattr(obj, field_name, str(value).lower() == "true")
+                else:
+                    setattr(obj, field_name, _to_decimal_or_none(value))
+            
+            # 对于更新操作，手动设置 updated_at
+            if not is_new:
+                obj.updated_at = now
+                objects_to_update.append(obj)
+            else:
+                objects_to_create.append(obj)
+        
+        # 批量创建新记录
+        if objects_to_create:
+            FlightMarketRecord.objects.bulk_create(objects_to_create)
+            updated += len(objects_to_create)
+        
+        # 批量更新现有记录
+        if objects_to_update:
+            # 获取所有需要更新的字段名（排除系统管理字段）
+            update_fields = [f.name for f in FlightMarketRecord._meta.get_fields() 
+                           if f.name not in {'id', 'created_at', 'updated_at'} 
+                           and not (f.many_to_many or f.one_to_many or f.many_to_one)]
+            # 确保 updated_at 在更新字段列表中
+            if 'updated_at' not in update_fields:
+                update_fields.append('updated_at')
+            
+            FlightMarketRecord.objects.bulk_update(objects_to_update, update_fields)
+            updated += len(objects_to_update)
+
+    return JsonResponse({
+        "code": 0,
+        "msg": "冲突处理完成",
+        "data": {
+            "updated": updated,
+            "skipped": skipped,
+        }
+    })
+
+
+# 前端上传接口（适配前端 CSV 文本格式）
+@api_view(['POST'])
+@csrf_exempt
+def upload_check(request):
+    """
+    检查上传数据，返回冲突信息
+    请求体: { "content": "CSV文本内容" }
+    返回:
+    - status: 1=无冲突可上传, 2=有冲突需处理, 3=格式错误
+    - conflicts: 冲突列表（status=2时）
+    """
+    try:
+        data = json.loads(request.body)
+        csv_content = data.get('content', '')
+        
+        if not csv_content:
+            return JsonResponse({
+                'status': 3,
+                'message': '缺少 CSV 内容'
+            }, status=400)
+        
+        # 解析 CSV
+        try:
+            all_rows = parse_csv_content(csv_content)
+        except ValueError as e:
+            return JsonResponse({
+                'status': 3,
+                'message': str(e)
+            }, status=400)
+        except Exception as e:
+            return JsonResponse({
+                'status': 3,
+                'message': f'解析失败: {str(e)}'
+            }, status=400)
+        
+        if not all_rows:
+            return JsonResponse({
+                'status': 3,
+                'message': 'CSV 文件为空或格式不正确'
+            }, status=400)
+        
+        # 检查冲突
+        conflicts = []
+        for row in all_rows:
+            if row['has_conflict']:
+                conflicts.append({
+                    'key': row['key'],
+                    'old': row.get('old_data', {}),
+                    'new': row['data']
+                })
+        
+        if conflicts:
+            return JsonResponse({
+                'status': 2,
+                'conflicts': conflicts
+            })
+        else:
+            return JsonResponse({
+                'status': 1,
+                'message': '数据检查通过，无冲突'
+            })
+            
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'status': 3,
+            'message': '请求体必须是有效的 JSON 格式'
+        }, status=400)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({
+            'status': 3,
+            'message': f'服务器错误: {str(e)}'
+        }, status=500)
+
+
+@api_view(['POST'])
+@csrf_exempt
+def upload_insert(request):
+    """
+    直接插入数据（无冲突时使用）
+    请求体: { "content": "CSV文本内容" }
+    返回: { "success": true/false }
+    """
+    try:
+        data = json.loads(request.body)
+        csv_content = data.get('content', '')
+        
+        if not csv_content:
+            return JsonResponse({
+                'success': False,
+                'message': '缺少 CSV 内容'
+            }, status=400)
+        
+        # 解析 CSV
+        try:
+            all_rows = parse_csv_content(csv_content)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'message': f'解析失败: {str(e)}'
+            }, status=400)
+        
+        if not all_rows:
+            return JsonResponse({
+                'success': False,
+                'message': 'CSV 文件为空或格式不正确'
+            }, status=400)
+        
+        # 检查是否有冲突（不应该有，但为了安全还是检查）
+        conflict_count = sum(1 for row in all_rows if row['has_conflict'])
+        if conflict_count > 0:
+            return JsonResponse({
+                'success': False,
+                'message': f'检测到 {conflict_count} 条冲突数据，请先处理冲突'
+            }, status=400)
+        
+        # 插入数据
+        created_count = 0
+        with transaction.atomic():
+            for row in all_rows:
+                data = row['data']
+                ym = data.get('year_month', '').strip()
+                origin = data.get('origin', '').strip().upper()
+                dest = data.get('destination', '').strip().upper()
+                equipment = data.get('equipment', '').strip()
+                
+                if not ym or not origin or not dest:
+                    continue
+                
+                # 创建新记录
+                obj = FlightMarketRecord()
+                # 系统管理的字段，不参与设置
+                excluded_fields = {'id', 'created_at', 'updated_at'}
+                for field_name, value in data.items():
+                    # 跳过系统管理的字段
+                    if field_name in excluded_fields:
+                        continue
+                    
+                    if field_name in ('year_month', 'origin', 'destination', 'equipment', 'region'):
+                        setattr(obj, field_name, value)
+                    elif field_name == 'international_flight':
+                        if isinstance(value, bool):
+                            setattr(obj, field_name, value)
+                        else:
+                            setattr(obj, field_name, str(value).lower() in ('true', '1', 'y', 'yes'))
+                    else:
+                        setattr(obj, field_name, _to_decimal_or_none(value))
+                
+                try:
+                    obj.save()
+                    created_count += 1
+                except Exception as e:
+                    # 忽略唯一约束冲突（可能并发插入）
+                    continue
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'成功插入 {created_count} 条数据'
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'message': '请求体必须是有效的 JSON 格式'
+        }, status=400)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({
+            'success': False,
+            'message': f'服务器错误: {str(e)}'
+        }, status=500)
+
+
+@api_view(['POST'])
+@csrf_exempt
+def upload_resolve(request):
+    """
+    处理冲突数据
+    请求体: { "decisions": [{"key": "...", "action": "keep"/"replace"}, ...] }
+    注意：前端需要同时发送完整的 CSV 内容，以便获取新数据
+    返回: { "success": true/false }
+    """
+    try:
+        data = json.loads(request.body)
+        decisions = data.get('decisions', [])
+        csv_content = data.get('content', '')  # 需要 CSV 内容来获取新数据
+        
+        if not decisions:
+            return JsonResponse({
+                'success': False,
+                'message': '缺少处理决策'
+            }, status=400)
+        
+        if not csv_content:
+            return JsonResponse({
+                'success': False,
+                'message': '缺少 CSV 内容'
+            }, status=400)
+        
+        # 解析 CSV 获取新数据
+        try:
+            all_rows = parse_csv_content(csv_content)
+        except Exception as e:
+            return JsonResponse({
+                'success': False,
+                'message': f'解析失败: {str(e)}'
+            }, status=400)
+        
+        # 构建 key -> data 映射
+        data_map = {row['key']: row['data'] for row in all_rows}
+        
+        # 处理冲突（批量操作）
+        updated_count = 0
+        skipped_count = 0
+        objects_to_update = []
+        objects_to_create = []
+        now = timezone.now()
+        
+        with transaction.atomic():
+            for decision in decisions:
+                key = decision.get('key', '')
+                action = decision.get('action', 'keep')
+                
+                if action == 'keep':
+                    skipped_count += 1
+                    continue
+                
+                # action == 'replace'
+                new_data = data_map.get(key)
+                if not new_data:
+                    continue
+                
+                # 从数据中获取关键字段
+                ym = (new_data.get('year_month') or '').strip()
+                origin = (new_data.get('origin') or '').strip().upper()
+                dest = (new_data.get('destination') or '').strip().upper()
+                
+                if not ym or not origin or not dest:
+                    continue
+                
+                # 查找现有记录
+                obj = FlightMarketRecord.objects.filter(
+                    year_month=ym,
+                    origin=origin,
+                    destination=dest,
+                ).first()
+                
+                excluded_fields = {'id', 'created_at', 'updated_at'}
+                
+                if not obj:
+                    # 如果不存在，创建新记录
+                    obj = FlightMarketRecord()
+                    is_new = True
+                else:
+                    # 如果存在，保留 id 和 created_at
+                    # updated_at 需要手动设置为当前时间（因为 bulk_update 不会自动更新 auto_now 字段）
+                    is_new = False
+                
+                # 更新所有字段（排除 id, created_at, updated_at，这些字段由系统管理）
+                for field_name, value in new_data.items():
+                    # 跳过系统管理的字段
+                    if field_name in excluded_fields:
+                        continue
+                    
+                    if field_name in ('year_month', 'origin', 'destination', 'equipment', 'region'):
+                        setattr(obj, field_name, value)
+                    elif field_name == 'international_flight':
+                        if isinstance(value, bool):
+                            setattr(obj, field_name, value)
+                        else:
+                            setattr(obj, field_name, str(value).lower() in ('true', '1', 'y', 'yes'))
+                    else:
+                        setattr(obj, field_name, _to_decimal_or_none(value))
+                
+                # 对于更新操作，手动设置 updated_at
+                if not is_new:
+                    obj.updated_at = now
+                    objects_to_update.append(obj)
+                else:
+                    objects_to_create.append(obj)
+            
+            # 批量创建新记录
+            if objects_to_create:
+                FlightMarketRecord.objects.bulk_create(objects_to_create)
+                updated_count += len(objects_to_create)
+            
+            # 批量更新现有记录
+            if objects_to_update:
+                # 获取所有需要更新的字段名（排除系统管理字段）
+                update_fields = [f.name for f in FlightMarketRecord._meta.get_fields() 
+                               if f.name not in {'id', 'created_at', 'updated_at'} 
+                               and not (f.many_to_many or f.one_to_many or f.many_to_one)]
+                # 确保 updated_at 在更新字段列表中
+                if 'updated_at' not in update_fields:
+                    update_fields.append('updated_at')
+                
+                FlightMarketRecord.objects.bulk_update(objects_to_update, update_fields)
+                updated_count += len(objects_to_update)
+        
+        return JsonResponse({
+            'success': True,
+            'message': f'处理完成：更新 {updated_count} 条，跳过 {skipped_count} 条'
+        })
+        
+    except json.JSONDecodeError:
+        return JsonResponse({
+            'success': False,
+            'message': '请求体必须是有效的 JSON 格式'
+        }, status=400)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({
+            'success': False,
+            'message': f'服务器错误: {str(e)}'
+        }, status=500)

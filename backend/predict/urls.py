@@ -25,4 +25,8 @@ urlpatterns = [
     path('formal/train/', views.formal_train_model, name='formal_train_model'),
     path('pretrain/models/', views.get_pretrain_models, name='get_pretrain_models'),
     path('data/get_flightdata/', views.query_flight_market, name='query_flight_market'),
+    path('train_file/save_locate/', views.download_train_file, name='download_train_file'),
+    path('data/upload/check/', views.upload_check, name='upload_check'),
+    path('data/upload/insert/', views.upload_insert, name='upload_insert'),
+    path('data/upload/resolve/', views.upload_resolve, name='upload_resolve'),
 ]

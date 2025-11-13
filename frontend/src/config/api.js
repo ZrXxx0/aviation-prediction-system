@@ -11,7 +11,7 @@ const API_CONFIG = {
     timeout: 10000,
   },
   production: {
-    baseURL: 'https://your-production-server.com', // 生产环境服务器地址
+    baseURL: 'https://airlinemarket.online/api/', // 生产环境服务器地址
     timeout: 15000,
   },
   staging: {
@@ -40,15 +40,15 @@ const API_ENDPOINTS = {
   PREDICT: {
     MODELS: '/predict/forecast/models/',
     FORECAST: '/predict/forecast/run/',
-    PRETRAIN: '/predict/pretrain/pretrain/',
+    PRETRAIN: '/predict/pretrain/model/',
     MODEL_STATUS: '/predict/model-status/',
     TRAIN: '/predict/formal/train/',
     FLIGHTDATA: '/predict/data/get_flightdata/',
+    DOWNLOAD_TRAIN_FILE: '/predict/train_file/save_locate/',
+    UPLOAD_CHECK: '/predict/data/upload/check/',
+    UPLOAD_INSERT: '/predict/data/upload/insert/',
+    UPLOAD_RESOLVE: '/predict/data/upload/resolve/',
   },
-  // // 数据管理API
-  // MANAGEMENT: {
-  //   FLIGHTDATA: '/predict/data/get_flightdata/',
-  // },
   // 其他API端点可以在这里添加
 };
 

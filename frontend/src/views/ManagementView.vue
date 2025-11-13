@@ -1,9 +1,9 @@
 <template>
   <div class="manage-container">
-    <el-tabs v-model="activeTab" type="card" stretch>
+    <el-tabs v-model="activeTab" type="card" stretch :class="{ 'disabled-tabs': showProcessing }">
       
       <!-- 数据查询 Tab -->
-      <el-tab-pane label="数据查询" name="query">
+      <el-tab-pane label="数据查询" name="query" :disabled="showProcessing">
         <div class="query-panel">
           <el-form :model="queryForm" ref="queryFormRef" label-width="100px" inline>
             
@@ -14,6 +14,7 @@
                 :props="cascaderProps"
                 clearable
                 placeholder="选择起点机场"
+                :disabled="showProcessing"
               />
             </el-form-item>
 
@@ -24,6 +25,7 @@
                 :props="cascaderProps"
                 clearable
                 placeholder="选择终点机场"
+                :disabled="showProcessing"
               />
             </el-form-item>
 
@@ -35,48 +37,60 @@
                 end-placeholder="结束月份"
                 value-format="YYYY-MM"
                 clearable
+                :disabled="showProcessing"
               />
             </el-form-item>
 
             <el-form-item>
-              <el-button type="primary" @click="searchData">查询</el-button>
-              <el-button @click="resetQuery">重置</el-button>
+              <el-button type="primary" @click="searchData" :disabled="showProcessing">查询</el-button>
+              <el-button @click="resetQuery" :disabled="showProcessing">重置</el-button>
             </el-form-item>
-
           </el-form>
 
           <!-- 查询结果 -->
-          <div class="query-table" v-if="tableData.length">
-            <el-table :data="tableData" border stripe style="width: 100%">
-              <el-table-column prop="origin" label="起点机场" min-width="100"/>
-              <el-table-column prop="destination" label="终点机场" min-width="100"/>
-              <el-table-column prop="date" label="时间" min-width="120"/>
-              <el-table-column prop="capacity" label="运力" min-width="100"/>
-              <el-table-column prop="passengers" label="运量" min-width="100"/>
-              <el-table-column prop="flights" label="航班数" min-width="100"/>
-            </el-table>
-
+          <div class="query-table" v-if="pagedData.length">
             <div class="toolbar">
-              <el-pagination
-                background
-                layout="prev, pager, next, sizes, total"
-                :page-sizes="[10, 20, 50, 100]"
-                :page-size="pagination.pageSize"
-                :current-page="pagination.currentPage"
-                :total="pagination.total"
-                @size-change="handleSizeChange"
-                @current-change="handleCurrentChange"
-                class="pagination"
-              />
+              <el-popover placement="bottom" trigger="click" width="250px">
+                <template #reference>
+                  <el-button type="primary" size="small" :disabled="showProcessing">选择显示列</el-button>
+                </template>
 
-              <el-button
-                type="success"
-                @click="exportData"
-                class="export-btn"
-              >
-                导出查询结果
-              </el-button>
+                <el-checkbox-group v-model="selectedColumns" class="column-list">
+                  <el-checkbox v-for="col in allColumns" :key="col" :label="col">{{ col }}</el-checkbox>
+                </el-checkbox-group>
+
+                <div style="text-align: right; margin-top: 10px;">
+                  <el-button size="small" @click="selectAllColumns">全选</el-button>
+                  <el-button size="small" @click="clearAllColumns">清空</el-button>
+                </div>
+              </el-popover>
+
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <el-pagination
+                  background
+                  layout="prev, pager, next, sizes, total"
+                  :page-sizes="[10, 20, 50, 100]"
+                  :page-size="pagination.pageSize"
+                  :current-page="pagination.currentPage"
+                  :total="pagination.total"
+                  @size-change="handleSizeChange"
+                  @current-change="handleCurrentChange"
+                />
+                <el-button type="success" @click="exportData" :disabled="showProcessing">
+                  导出查询结果
+                </el-button>
+              </div>
             </div>
+
+            <el-table :data="pagedData" border stripe style="width: 100%">
+              <el-table-column
+                v-for="col in selectedColumns"
+                :key="col"
+                :prop="col"
+                :label="col"
+                min-width="100"
+              />
+            </el-table>
           </div>
 
           <div v-else class="empty-data">
@@ -86,15 +100,16 @@
       </el-tab-pane>
 
       <!-- 数据上传 Tab -->
-      <el-tab-pane label="数据上传" name="upload">
+      <el-tab-pane label="数据上传" name="upload" :disabled="showProcessing">
         <div class="data-manage-panel">
-          <el-button
-            type="primary"
-            @click="downloadTemplate"
-            class="download-btn"
-          >
-            下载数据模板（CSV）
-          </el-button>
+          <div class="download-buttons">
+            <el-button type="primary" @click="downloadTemplate" :disabled="showProcessing">
+              下载数据模板（CSV）
+            </el-button>
+            <el-button type="info" @click="downloadTemplateGuide" :disabled="showProcessing">
+              下载模板说明（PDF）
+            </el-button>
+          </div>
 
           <el-upload
             class="upload-demo"
@@ -106,6 +121,7 @@
             :file-list="fileList"
             :auto-upload="false"
             accept=".csv"
+            :disabled="showProcessing"
           >
             <div class="el-upload__text">拖拽或点击上传CSV数据文件</div>
             <div class="el-upload__tip">只能上传CSV格式文件，且不超过5MB</div>
@@ -113,37 +129,206 @@
 
           <div v-if="previewData.length" class="preview-table">
             <h4>数据预览（前10行）</h4>
-            <el-table
-              :data="previewData"
-              max-height="300"
-              stripe
-              border
-              style="width: 100%;"
-            >
-              <el-table-column
-                v-for="col in previewColumns"
-                :key="col"
-                :label="col"
-                :prop="col"
-              />
+            <el-table :data="previewData" max-height="300" stripe border style="width: 100%;">
+              <el-table-column v-for="col in previewColumns" :key="col" :label="col" :prop="col" />
             </el-table>
+
+            <div style="text-align: right; margin-top: 10px;">
+              <el-button type="primary" @click="uploadData" :disabled="showProcessing">上传数据</el-button>
+            </div>
           </div>
         </div>
-      </el-tab-pane>
 
+        <!-- 正在处理遮罩 -->
+        <el-dialog v-model="showProcessing" width="300px" :close-on-click-modal="false" :show-close="false">
+          <div style="text-align: center; padding: 20px;">
+            <el-icon class="is-loading" size="40"><Loading /></el-icon>
+            <div style="margin-top: 10px;">正在处理数据，请稍候...</div>
+          </div>
+        </el-dialog>
+
+        <!-- 确认上传 -->
+        <el-dialog v-model="confirmUploadDialog" title="确认上传" width="400px">
+          <span>数据检查通过，是否确认上传？</span>
+          <template #footer>
+            <el-button @click="confirmUploadDialog = false">取消</el-button>
+            <el-button type="primary" @click="confirmUpload">确认</el-button>
+          </template>
+        </el-dialog>
+
+        <!-- 冲突处理 -->
+        <el-dialog v-model="conflictDialog" title="检测到数据冲突" width="1400px">
+          <div class="conflict-dialog-content">
+            <p style="margin-bottom: 15px;">以下数据在数据库中已存在，请选择是否覆盖：</p>
+            
+            <!-- 批量操作栏 -->
+            <div class="batch-actions" style="margin-bottom: 15px;">
+              <el-checkbox v-model="selectAllConflicts" @change="handleSelectAllConflicts">
+                全选
+              </el-checkbox>
+              <el-button 
+                type="primary" 
+                size="small" 
+                :disabled="selectedConflictIds.length === 0"
+                @click="batchReplaceConflicts"
+              >
+                批量替换 ({{ selectedConflictIds.length }})
+              </el-button>
+              <el-button 
+                size="small" 
+                :disabled="selectedConflictIds.length === 0"
+                @click="batchKeepConflicts"
+              >
+                批量保留 ({{ selectedConflictIds.length }})
+              </el-button>
+            </div>
+
+            <!-- 冲突数据表格 -->
+            <el-table 
+              ref="conflictTableRef"
+              :data="pagedConflictData" 
+              border 
+              stripe
+              row-key="id"
+              @selection-change="handleConflictSelectionChange"
+            >
+              <el-table-column type="selection" width="55" />
+              <el-table-column prop="origin" label="起点" width="120" />
+              <el-table-column prop="destination" label="终点" width="120" />
+              <el-table-column prop="year_month" label="时间" width="120" />
+              <el-table-column prop="conflict_key" label="唯一标识" width="180" show-overflow-tooltip />
+              <el-table-column label="操作" width="280" fixed="right">
+                <template #default="{ row }">
+                  <el-button 
+                    type="primary" 
+                    plain 
+                    size="small" 
+                    @click="showConflictDetail(row)"
+                  >
+                    查看详情
+                  </el-button>
+                  <el-button 
+                    type="success" 
+                    plain 
+                    size="small" 
+                    :class="{ 'is-active': row.action === 'keep' }"
+                    @click="setConflictAction(row, 'keep')"
+                  >
+                    保留
+                  </el-button>
+                  <el-button 
+                    type="danger" 
+                    plain 
+                    size="small" 
+                    :class="{ 'is-active': row.action === 'replace' }"
+                    @click="setConflictAction(row, 'replace')"
+                  >
+                    替换
+                  </el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+
+            <!-- 分页 -->
+            <div class="conflict-pagination">
+              <el-pagination
+                v-model:current-page="conflictPagination.currentPage"
+                v-model:page-size="conflictPagination.pageSize"
+                :page-sizes="[10, 20, 50, 100]"
+                :total="conflictPagination.total"
+                layout="total, sizes, prev, pager, next, jumper"
+                @size-change="handleConflictSizeChange"
+                @current-change="handleConflictPageChange"
+              />
+            </div>
+          </div>
+
+          <template #footer>
+            <el-button @click="conflictDialog = false">取消</el-button>
+            <el-button type="primary" @click="submitConflictResolution">确认提交</el-button>
+          </template>
+        </el-dialog>
+
+        <!-- 冲突详情弹窗 -->
+        <el-dialog 
+          v-model="conflictDetailDialog" 
+          title="冲突详情对比" 
+          width="1000px"
+          :close-on-click-modal="false"
+        >
+          <div class="conflict-detail-content" v-if="currentConflictDetail">
+            <div class="detail-header">
+              <p><strong>起点：</strong>{{ currentConflictDetail.origin }}</p>
+              <p><strong>终点：</strong>{{ currentConflictDetail.destination }}</p>
+              <p><strong>时间：</strong>{{ currentConflictDetail.year_month || currentConflictDetail.date }}</p>
+            </div>
+            
+            <el-table :data="conflictDetailFields" border stripe style="margin-top: 20px;">
+              <el-table-column prop="field" label="字段" width="200" />
+              <el-table-column label="原有数据" min-width="250">
+                <template #default="{ row }">
+                  <div :class="{ 'diff-highlight': row.hasDiff }" class="detail-value-cell">
+                    <pre v-if="isJsonString(row.oldValue)" class="json-value">{{ row.oldValue }}</pre>
+                    <span v-else>{{ row.oldValue }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+              <el-table-column label="上传数据" min-width="250">
+                <template #default="{ row }">
+                  <div :class="{ 'diff-highlight': row.hasDiff }" class="detail-value-cell">
+                    <pre v-if="isJsonString(row.newValue)" class="json-value">{{ row.newValue }}</pre>
+                    <span v-else>{{ row.newValue }}</span>
+                  </div>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <template #footer>
+            <el-button @click="conflictDetailDialog = false">关闭</el-button>
+          </template>
+        </el-dialog>
+      </el-tab-pane>
     </el-tabs>
   </div>
 </template>
 
 <script setup>
-import apiConfig from '@/config/api.js';
-import { ref, reactive, computed, onMounted } from 'vue'
+import apiConfig from '@/config/api.js'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
+import templateCsvUrl from '@/assets/data_template.csv?url'
+import templatePdfUrl from '@/assets/模板说明.pdf?url'
+// import Papa from 'papaparse'
 
+/* --- 基础状态 --- */
 const activeTab = ref('query')
-const fileList = ref([])
-const previewData = ref([])
-const previewColumns = ref([])
+const showProcessing = ref(false)
+const confirmUploadDialog = ref(false)
+const conflictDialog = ref(false)
+const conflictData = ref([])
+const conflictDetailDialog = ref(false)
+const currentConflictDetail = ref(null)
+const conflictDetailFields = ref([])
+const selectedConflictIds = ref([])
+const selectAllConflicts = ref(false)
+const conflictTableRef = ref(null)
 
+/* --- 冲突数据分页 --- */
+const conflictPagination = reactive({
+  currentPage: 1,
+  pageSize: 20,
+  total: 0
+})
+
+const pagedConflictData = computed(() => {
+  const start = (conflictPagination.currentPage - 1) * conflictPagination.pageSize
+  const end = conflictPagination.currentPage * conflictPagination.pageSize
+  return conflictData.value.slice(start, end)
+})
+
+/* --- 查询表单 --- */
 const queryForm = reactive({
   originCity: [],
   destinationCity: [],
@@ -156,7 +341,31 @@ const pagination = reactive({
   pageSize: 10,
   total: 0
 })
+const fullData = ref([])
 
+/* --- 动态列控制 --- */
+const allColumns = ref([])
+const selectedColumns = ref([])
+watch(fullData, (val) => {
+  if (val.length > 0) {
+    allColumns.value = Object.keys(val[0])
+    if (selectedColumns.value.length === 0) selectedColumns.value = [...allColumns.value]
+  }
+})
+function selectAllColumns() { selectedColumns.value = [...allColumns.value] }
+function clearAllColumns() { selectedColumns.value = [] }
+
+/* --- 分页显示 --- */
+const pagedData = computed(() => {
+  const start = (pagination.currentPage - 1) * pagination.pageSize
+  const end = pagination.currentPage * pagination.pageSize
+  return fullData.value.slice(start, end)
+})
+
+function handleSizeChange(size) { pagination.pageSize = size }
+function handleCurrentChange(page) { pagination.currentPage = page }
+
+/* --- 加载机场数据 --- */
 const locationOptions = ref([])
 const cascaderProps = {
   expandTrigger: 'hover',
@@ -166,269 +375,618 @@ const cascaderProps = {
   label: 'label',
   children: 'children'
 }
-
-// 过滤终点机场，避免选择和起点相同
 const filteredDestinationOptions = computed(() => {
   if (!queryForm.originCity?.length || queryForm.originCity.length !== 3) return locationOptions.value
-  const [originProvince, originCity, originIATA] = queryForm.originCity
-  return locationOptions.value.map(province => ({
-    ...province,
-    children: province.children.map(city => ({
-      ...city,
-      children: city.children.filter(airport => airport.value !== originIATA)
+  const [_, __, originIATA] = queryForm.originCity
+  return locationOptions.value.map(p => ({
+    ...p,
+    children: p.children.map(c => ({
+      ...c,
+      children: c.children.filter(a => a.value !== originIATA)
     }))
   }))
 })
-
-// 加载机场数据
 async function loadAirportData() {
   try {
-    const response = await fetch('/src/assets/iata_city_airport_mapping.json')
-    const data = await response.json()
-
+    const res = await fetch('/src/assets/iata_city_airport_mapping.json')
+    const data = await res.json()
     const provinceMap = {}
-
-    // 遍历 JSON 构造层级结构
     Object.entries(data).forEach(([iata, info]) => {
       const { province, city, airport } = info
-
       if (!provinceMap[province]) provinceMap[province] = {}
       if (!provinceMap[province][city]) provinceMap[province][city] = []
-
-      provinceMap[province][city].push({
-        label: airport,   // 前端显示机场名称
-        value: iata       // 最终传给后端的三字码
-      })
+      provinceMap[province][city].push({ label: airport, value: iata })
     })
-
-    // 转换成 Cascader 所需格式
-    locationOptions.value = Object.entries(provinceMap).map(([province, cities]) => ({
-      label: province,
-      value: province,
-      children: Object.entries(cities).map(([city, airports]) => ({
-        label: city,
-        value: city,
+    locationOptions.value = Object.entries(provinceMap).map(([p, cities]) => ({
+      label: p,
+      value: p,
+      children: Object.entries(cities).map(([c, airports]) => ({
+        label: c,
+        value: c,
         children: airports
       }))
     }))
-  } catch (error) {
-    console.error('加载机场数据失败:', error)
-    alert('加载机场数据失败，请刷新页面重试')
+  } catch {
+    ElMessage.error('加载机场数据失败')
   }
 }
 
-// 查询
+/* --- 查询功能 --- */
 async function searchData() {
   try {
-    const params = new URLSearchParams();
-
-    if (queryForm.originCity?.length === 3)
-      params.append('origin', queryForm.originCity[2]);
-    if (queryForm.destinationCity?.length === 3)
-      params.append('destination', queryForm.destinationCity[2]);
-
+    showProcessing.value = true
+    const params = new URLSearchParams()
+    if (queryForm.originCity?.length === 3) params.append('origin', queryForm.originCity[2])
+    if (queryForm.destinationCity?.length === 3) params.append('destination', queryForm.destinationCity[2])
     if (queryForm.dateRange?.length === 2) {
-      // 直接使用 picker 返回的字符串
-      params.append('start_date', queryForm.dateRange[0]);
-      params.append('end_date', queryForm.dateRange[1]);
+      params.append('start_date', queryForm.dateRange[0])
+      params.append('end_date', queryForm.dateRange[1])
     }
-
-    // const url = `http://localhost:8000/predict/data/get_flightdata/?${params.toString()}`
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.FLIGHTDATA) + `?${params.toString()}`
-    console.log('请求 URL:', url)
     const res = await fetch(url)
     const result = await res.json()
+    showProcessing.value = false
 
-    if (!result.success) {
-      alert('数据请求失败，请重试')
-      return
-    }
-
+    if (!result.success) return ElMessage.error('数据请求失败')
     const rawData = result.data || []
-
-    // 前端分页
     pagination.total = rawData.length
-    const start = (pagination.currentPage - 1) * pagination.pageSize
-    const end = pagination.currentPage * pagination.pageSize
 
-    tableData.value = rawData.slice(start, end).map(item => ({
-      origin: item.origin.code,
-      destination: item.destination.code,
-      date: item.year_month,
-      capacity: item.route_total_seats,
-      passengers: item.route_total_flights,
-      flights: item.route_total_flights
-    }))
-
-  } catch (error) {
-    console.error('查询失败:', error)
-    alert('查询失败，请检查网络或后端服务')
+    // 动态字段解析
+    fullData.value = rawData.map(item => {
+      const flat = {}
+      for (const [k, v] of Object.entries(item)) {
+        flat[k] = (typeof v === 'object' && v?.code) ? v.code : v
+      }
+      return flat
+    })
+  } catch (err) {
+    showProcessing.value = false
+    ElMessage.error('查询失败，请检查网络或后端服务')
+    console.error(err)
   }
 }
-
-//重置
 function resetQuery() {
   queryForm.originCity = []
   queryForm.destinationCity = []
   queryForm.dateRange = []
-  tableData.value = []
+  fullData.value = []
+  selectedColumns.value = []
   pagination.currentPage = 1
 }
 
-// 分页事件
-function handleSizeChange(size) {
-  pagination.pageSize = size
-  searchData()
-}
-function handleCurrentChange(page) {
-  pagination.currentPage = page
-  searchData()
-}
-
-// 导出 CSV
 function exportData() {
-  if (!tableData.value.length) return
-  const headers = Object.keys(tableData.value[0]).join(',')
-  const csvContent = [headers, ...tableData.value.map(r => Object.values(r).join(','))].join('\n')
+  if (!fullData.value.length) {
+    ElMessage.warning('没有可导出的数据')
+    return
+  }
+  if (!selectedColumns.value.length) {
+    ElMessage.warning('请先选择要导出的列')
+    return
+  }
+
+  // 组装 CSV 字符串
+  const header = selectedColumns.value.join(',')
+  const rows = fullData.value.map(row => 
+    selectedColumns.value.map(col => {
+      const cell = row[col] ?? ''
+      // 处理包含逗号、引号等特殊字符的字段，使用双引号包裹并转义引号
+      const escaped = String(cell).replace(/"/g, '""')
+      return `"${escaped}"`
+    }).join(',')
+  )
+  const csvContent = [header, ...rows].join('\r\n')
+
+  // 生成下载链接
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
-  link.download = '查询结果.csv'
+  link.download = `查询结果_${new Date().toISOString().slice(0,10)}.csv`
   link.click()
   URL.revokeObjectURL(link.href)
 }
 
-// 下载模板
-function downloadTemplate() {
-  const csvContent =
-    '航线起点,航线终点,时间,运力,运量,航班数\n北京,上海,2024-01,1000,900,30\n上海,广州,2024-01,1200,1100,28\n'
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const link = document.createElement('a')
-  link.href = URL.createObjectURL(blob)
-  link.download = '数据模板.csv'
-  link.click()
-  URL.revokeObjectURL(link.href)
-}
+/* --- CSV 上传 --- */
+const fileList = ref([])
+const previewData = ref([])
+const previewColumns = ref([])
+let uploadedFileContent = ''
 
-// 上传文件校验
 function beforeUpload(file) {
-  const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv')
+  const isCSV = file.name.endsWith('.csv')
   const isLt5M = file.size / 1024 / 1024 < 5
-  if (!isCSV) { alert('只能上传CSV文件'); return false }
-  if (!isLt5M) { alert('文件大小不能超过5MB'); return false }
+  if (!isCSV) {
+    ElMessage.error('只能上传CSV文件')
+    return false
+  }
+  if (!isLt5M) {
+    ElMessage.error('文件大小不能超过5MB')
+    return false
+  }
   return true
 }
 
-function handleFileChange(file, fileListNew) {
-  fileList.value = fileListNew
+function handleFileChange(file, list) {
+  fileList.value = list
   if (!file.raw) return
+
   const reader = new FileReader()
-  reader.onload = e => { parseCSVPreview(e.target.result) }
-  reader.readAsText(file.raw)
+  reader.onload = e => {
+    uploadedFileContent = e.target.result
+
+    // 调用自定义 CSV 解析函数
+    const { headers, rows } = parseCSV(uploadedFileContent)
+
+    previewColumns.value = headers
+    previewData.value = rows.slice(0, 10) // 预览前 10 行
+  }
+  reader.readAsText(file.raw, 'utf-8')
 }
 
-function parseCSVPreview(csvText) {
-  const lines = csvText.split(/\r?\n/)
-  const previewLines = lines.slice(0, 11)
-  if (previewLines.length < 2) { previewData.value = []; previewColumns.value = []; return }
-  const headers = previewLines[0].split(',')
-  previewColumns.value = headers
-  const rows = previewLines.slice(1).map(line => {
-    const vals = line.split(',')
-    const obj = {}
-    headers.forEach((h, idx) => { obj[h] = vals[idx] })
-    return obj
+function parseCSV(csvText) {
+  const rows = []
+  let currentRow = []
+  let currentField = ''
+  let insideQuotes = false
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i]
+    const nextChar = csvText[i + 1]
+    if (char === '"' && insideQuotes && nextChar === '"') {
+      // 连续两个双引号 → 转义为一个引号
+      currentField += '"'
+      i++
+    } else if (char === '"') {
+      // 切换引号状态
+      insideQuotes = !insideQuotes
+    } else if (char === ',' && !insideQuotes) {
+      // 字段结束
+      currentRow.push(currentField.trim())
+      currentField = ''
+    } else if ((char === '\n' || char === '\r') && !insideQuotes) {
+      // 行结束（忽略空行）
+      if (currentField || currentRow.length > 0) {
+        currentRow.push(currentField.trim())
+        rows.push(currentRow)
+      }
+      currentRow = []
+      currentField = ''
+    } else {
+      currentField += char
+    }
+  }
+  // 添加最后一个字段
+  if (currentField || currentRow.length > 0) {
+    currentRow.push(currentField.trim())
+    rows.push(currentRow)
+  }
+  // 取首行为表头
+  const headers = rows.shift() || []
+  // 构建对象数组
+  const dataObjects = rows
+    .filter(r => r.length > 0 && r.some(x => x.trim() !== ''))
+    .map(r => {
+      const obj = {}
+      headers.forEach((key, i) => (obj[key] = r[i] || ''))
+      return obj
+    })
+  return { headers, rows: dataObjects }
+}
+
+
+async function uploadData() {
+  if (!uploadedFileContent) return ElMessage.warning('请先选择CSV文件')
+  showProcessing.value = true
+  try {
+    // 暂无接口
+    const res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_CHECK), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: uploadedFileContent })
+    })
+    const result = await res.json()
+    showProcessing.value = false
+
+    if (result.status === 1) confirmUploadDialog.value = true
+    else if (result.status === 2) {
+      conflictData.value = result.conflicts.map(i => {
+        const oldData = i.old || {}
+        const newData = i.new || {}
+        return {
+          id: i.key, // 用于批量选择
+          conflict_key: i.key,
+          origin: oldData.origin_code || newData.origin_code || oldData.origin || newData.origin || '-',
+          destination: oldData.destination_code || newData.destination_code || oldData.destination || newData.destination || '-',
+          year_month: oldData.year_month || newData.year_month || oldData.date || newData.date || oldData.month || newData.month || '-',
+          old_data: oldData,
+          new_data: newData,
+          action: null  // 初始状态未选择，需要用户明确选择
+        }
+      })
+      conflictPagination.total = conflictData.value.length
+      conflictPagination.currentPage = 1
+      selectedConflictIds.value = []
+      selectAllConflicts.value = false
+      conflictDialog.value = true
+    } else if (result.status === 3) ElMessage.error('文件格式错误')
+    else ElMessage.error('上传失败')
+  } catch (err) {
+    showProcessing.value = false
+    ElMessage.error('上传失败，请检查网络')
+    console.error(err)
+  }
+}
+
+async function confirmUpload() {
+  confirmUploadDialog.value = false
+  showProcessing.value = true
+  try {
+    // 暂无接口
+    const res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_INSERT), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: uploadedFileContent })
+    })
+    const result = await res.json()
+    showProcessing.value = false
+    if (result.success) {
+      ElMessage.success('数据上传成功')
+      fileList.value = []
+      previewData.value = []
+      previewColumns.value = []
+    } else ElMessage.error('数据插入失败')
+  } catch {
+    showProcessing.value = false
+    ElMessage.error('上传失败')
+  }
+}
+
+/* --- 冲突处理相关函数 --- */
+function isJsonString(str) {
+  if (typeof str !== 'string') return false
+  try {
+    const parsed = JSON.parse(str)
+    return typeof parsed === 'object' && parsed !== null
+  } catch {
+    return false
+  }
+}
+
+function showConflictDetail(row) {
+  currentConflictDetail.value = row
+  const oldData = row.old_data || {}
+  const newData = row.new_data || {}
+  
+  // 获取所有字段
+  const allFields = new Set([...Object.keys(oldData), ...Object.keys(newData)])
+  
+  // 构建对比字段数组
+  conflictDetailFields.value = Array.from(allFields).map(field => {
+    const oldValue = oldData[field]
+    const newValue = newData[field]
+    
+    // 格式化值显示
+    const formatValue = (val) => {
+      if (val === null || val === undefined) return '(空)'
+      if (typeof val === 'object') {
+        try {
+          return JSON.stringify(val, null, 2)
+        } catch {
+          return String(val)
+        }
+      }
+      return String(val)
+    }
+    
+    const formattedOldValue = formatValue(oldValue)
+    const formattedNewValue = formatValue(newValue)
+    const hasDiff = formattedOldValue !== formattedNewValue
+    
+    return {
+      field,
+      oldValue: formattedOldValue,
+      newValue: formattedNewValue,
+      hasDiff
+    }
   })
-  previewData.value = rows.filter(r => Object.values(r).some(v => v))
+  
+  conflictDetailDialog.value = true
 }
 
-onMounted(() => { loadAirportData() })
+function handleConflictSelectionChange(selection) {
+  selectedConflictIds.value = selection.map(item => item.id)
+  // 更新全选状态
+  selectAllConflicts.value = selection.length === pagedConflictData.value.length && pagedConflictData.value.length > 0
+}
+
+function handleSelectAllConflicts(val) {
+  if (conflictTableRef.value) {
+    if (val) {
+      // 全选当前页
+      pagedConflictData.value.forEach(row => {
+        conflictTableRef.value.toggleRowSelection(row, true)
+      })
+    } else {
+      // 取消全选
+      conflictTableRef.value.clearSelection()
+    }
+  }
+}
+
+function batchReplaceConflicts() {
+  if (selectedConflictIds.value.length === 0) return
+  conflictData.value.forEach(item => {
+    if (selectedConflictIds.value.includes(item.id)) {
+      item.action = 'replace'
+    }
+  })
+  ElMessage.success(`已批量设置为替换 (${selectedConflictIds.value.length}条)`)
+  if (conflictTableRef.value) {
+    conflictTableRef.value.clearSelection()
+  }
+  selectedConflictIds.value = []
+  selectAllConflicts.value = false
+}
+
+function batchKeepConflicts() {
+  if (selectedConflictIds.value.length === 0) return
+  conflictData.value.forEach(item => {
+    if (selectedConflictIds.value.includes(item.id)) {
+      item.action = 'keep'
+    }
+  })
+  ElMessage.success(`已批量设置为保留 (${selectedConflictIds.value.length}条)`)
+  if (conflictTableRef.value) {
+    conflictTableRef.value.clearSelection()
+  }
+  selectedConflictIds.value = []
+  selectAllConflicts.value = false
+}
+
+function setConflictAction(row, action) {
+  row.action = action
+  handleConflictActionChange(row)
+}
+
+function handleConflictActionChange(row) {
+  // 当单个操作改变时，从选中列表中移除（如果存在）
+  const index = selectedConflictIds.value.indexOf(row.id)
+  if (index > -1) {
+    selectedConflictIds.value.splice(index, 1)
+  }
+}
+
+function handleConflictSizeChange(size) {
+  conflictPagination.pageSize = size
+  conflictPagination.currentPage = 1
+  if (conflictTableRef.value) {
+    conflictTableRef.value.clearSelection()
+  }
+  selectedConflictIds.value = []
+  selectAllConflicts.value = false
+}
+
+function handleConflictPageChange(page) {
+  conflictPagination.currentPage = page
+  if (conflictTableRef.value) {
+    conflictTableRef.value.clearSelection()
+  }
+  selectedConflictIds.value = []
+  selectAllConflicts.value = false
+}
+
+async function submitConflictResolution() {
+  // 检查是否有未选择的项
+  const unselectedItems = conflictData.value.filter(r => !r.action)
+  if (unselectedItems.length > 0) {
+    ElMessage.warning(`还有 ${unselectedItems.length} 条冲突数据未选择操作，请先选择"保留"或"替换"`)
+    return
+  }
+  
+  const userDecisions = conflictData.value.map(r => ({ key: r.conflict_key, action: r.action === 'replace' ? 'replace' : 'keep' }))
+  conflictDialog.value = false
+  showProcessing.value = true
+  try {
+    const res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_RESOLVE), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        decisions: userDecisions,
+        content: uploadedFileContent  // 发送完整的 CSV 内容
+      })
+    })
+    const result = await res.json()
+    showProcessing.value = false
+    if (result.success) {
+      ElMessage.success('冲突数据处理完成')
+      fileList.value = []
+      previewData.value = []
+      previewColumns.value = []
+      uploadedFileContent = ''
+    } else ElMessage.error(result.message || '冲突处理失败')
+  } catch (err) {
+    showProcessing.value = false
+    ElMessage.error('提交失败，请检查网络')
+    console.error(err)
+  }
+}
+
+/* --- 下载模板 --- */
+async function downloadTemplate() {
+  try {
+    const response = await fetch(templateCsvUrl)
+    if (!response.ok) {
+      throw new Error('模板文件加载失败')
+    }
+    const csvContent = await response.text()
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = 'data_template.csv'
+    link.click()
+    URL.revokeObjectURL(link.href)
+    ElMessage.success('模板下载成功')
+  } catch (err) {
+    ElMessage.error('模板下载失败：' + err.message)
+    console.error(err)
+  }
+}
+
+async function downloadTemplateGuide() {
+  try {
+    const response = await fetch(templatePdfUrl)
+    if (!response.ok) {
+      throw new Error('模板说明文件加载失败')
+    }
+    const blob = await response.blob()
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob)
+    link.download = '模板说明.pdf'
+    link.click()
+    URL.revokeObjectURL(link.href)
+    ElMessage.success('模板说明下载成功')
+  } catch (err) {
+    ElMessage.error('模板说明下载失败：' + err.message)
+    console.error(err)
+  }
+}
+
+onMounted(loadAirportData)
 </script>
 
 <style scoped>
 .manage-container {
-  padding: 1rem 2rem;
+  padding: 2rem 2.5rem;
   max-width: 1600px;
   margin: 0 auto;
+  background-color: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
-
-.query-panel, .data-manage-panel {
-  padding: 20px 10px;
+.disabled-tabs {
+  pointer-events: none;
+  opacity: 0.6;
 }
-
-.el-form-item {
+.query-panel { 
+  padding: 24px 20px; 
+  background: #fafafa; 
+  border-radius: 8px; 
+}
+.el-cascader, .el-date-picker { 
+  width: 240px; 
+}
+.query-table { 
+  margin-top: 24px; 
+  background: #fff; 
+  border-radius: 8px; 
+  padding: 16px; }
+.toolbar { 
+  display: flex; 
+  justify-content: space-between; 
+  align-items: center; 
+  margin-bottom: 12px; }
+.empty-data { 
+  margin-top: 40px; 
+}
+.data-manage-panel { 
+  padding: 24px; 
+}
+.preview-table { 
+  margin-top: 24px; 
+}
+.download-buttons {
   margin-bottom: 20px;
-}
-
-.el-cascader, .el-date-picker {
-  width: 220px;
-}
-
-/* 按钮统一样式，文字居中 */
-.el-button {
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  font-size: 14px;
-  height: 32px;
-  padding: 0 16px;
-  line-height: normal;
-}
-
-/* 表格间距 */
-.query-table, .preview-table {
-  margin-top: 20px;
-}
-
-/* 空数据样式 */
-.empty-data {
-  margin-top: 50px;
-  text-align: center;
-}
-
-/* 预览表格标题 */
-.preview-table h4 {
-  font-size: 16px;
-  font-weight: 500;
-  margin-bottom: 15px;
-}
-
-/* 表格字体大小 */
-.el-table th, .el-table td {
-  text-align: center;
-  font-size: 14px;
-  height: 40px;
-}
-
-/* 查询结果容器间距 */
-.query-table {
-  margin-top: 30px; /* 表格与上方表单间距增大 */
-}
-
-/* 分页栏间距 */
-.query-table .el-pagination {
-  margin-top: 20px; /* 分页栏与表格间距增大 */
-  text-align: right;
-}
-
-/* 导出按钮间距 */
-.query-table .export-btn {
-  margin-top: 20px; /* 按钮与分页栏间距增大 */
-}
-
-.toolbar {
   display: flex;
-  justify-content: space-between; /* 两端对齐 */
-  align-items: center;            /* 垂直居中 */
-  margin-top: 16px;               /* 上边距，可按需调整 */
+  gap: 10px;
 }
 
-.pagination {
-  flex-shrink: 0; /* 避免被压缩 */
+/* 冲突处理相关样式 */
+.conflict-dialog-content {
+  padding: 10px 0;
 }
 
-.export-btn {
-  flex-shrink: 0;
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  padding: 10px;
+  background: #f5f7fa;
+  border-radius: 4px;
 }
 
+.conflict-pagination {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.conflict-detail-content {
+  padding: 10px 0;
+}
+
+.detail-header {
+  display: flex;
+  gap: 30px;
+  padding: 15px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  margin-bottom: 10px;
+}
+
+.detail-header p {
+  margin: 0;
+  font-size: 14px;
+}
+
+.diff-highlight {
+  color: #f56c6c;
+  font-weight: 600;
+  background-color: #fef0f0;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+.detail-value-cell {
+  padding: 4px 0;
+  word-break: break-word;
+}
+
+.json-value {
+  margin: 0;
+  padding: 8px;
+  background: #f5f7fa;
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 200px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 操作按钮样式 */
+.el-table-column:last-child .el-button {
+  margin-right: 8px;
+}
+
+.el-table-column:last-child .el-button.is-active {
+  background-color: var(--el-button-bg-color);
+  border-color: var(--el-button-border-color);
+}
+
+.el-table-column:last-child .el-button[type="primary"].is-active {
+  background-color: var(--el-color-primary-light-9);
+  border-color: var(--el-color-primary);
+  color: var(--el-color-primary);
+}
+
+.el-table-column:last-child .el-button[type="success"].is-active {
+  background-color: var(--el-color-success-light-9);
+  border-color: var(--el-color-success);
+  color: var(--el-color-success);
+}
+
+.el-table-column:last-child .el-button[type="danger"].is-active {
+  background-color: var(--el-color-danger-light-9);
+  border-color: var(--el-color-danger);
+  color: var(--el-color-danger);
+}
 </style>
