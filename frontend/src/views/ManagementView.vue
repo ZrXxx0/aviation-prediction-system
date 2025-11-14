@@ -50,19 +50,17 @@
           <!-- 查询结果 -->
           <div class="query-table" v-if="pagedData.length">
             <div class="toolbar">
-              <el-popover placement="bottom" trigger="click" width="250px">
+              <el-popover placement="bottom" trigger="click" width="500px">
                 <template #reference>
                   <el-button type="primary" size="small" :disabled="showProcessing">选择显示列</el-button>
                 </template>
-
-                <el-checkbox-group v-model="selectedColumns" class="column-list">
-                  <el-checkbox v-for="col in allColumns" :key="col" :label="col">{{ col }}</el-checkbox>
-                </el-checkbox-group>
-
                 <div style="text-align: right; margin-top: 10px;">
                   <el-button size="small" @click="selectAllColumns">全选</el-button>
                   <el-button size="small" @click="clearAllColumns">清空</el-button>
                 </div>
+                <el-checkbox-group v-model="selectedColumns" class="column-list">
+                  <el-checkbox v-for="col in allColumns" :key="col" :label="col">{{ col }}</el-checkbox>
+                </el-checkbox-group>
               </el-popover>
 
               <div style="display: flex; align-items: center; gap: 10px;">
@@ -345,11 +343,14 @@ const fullData = ref([])
 
 /* --- 动态列控制 --- */
 const allColumns = ref([])
-const selectedColumns = ref([])
+const selectedColumns = ref(['year_month','origin','destination','route_total_flights','route_total_seats'])
 watch(fullData, (val) => {
   if (val.length > 0) {
     allColumns.value = Object.keys(val[0])
-    if (selectedColumns.value.length === 0) selectedColumns.value = [...allColumns.value]
+    // 只在第一次查询时设置默认列，后续保留用户选择
+    if (selectedColumns.value.length === 0) {
+      selectedColumns.value = ['year_month', 'origin', 'destination']
+    }
   }
 })
 function selectAllColumns() { selectedColumns.value = [...allColumns.value] }
