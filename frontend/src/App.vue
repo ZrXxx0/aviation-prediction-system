@@ -1,16 +1,22 @@
 <template>
   <div id="app">
-    <AppHeader />
+    <AppHeader v-if="!hideHeader" />
     <main class="main-content">
       <router-view />
     </main>
-    <AppFooter />
+    <AppFooter v-if="!hideFooter" />
   </div>
 </template>
 
 <script setup>
+import { computed } from 'vue'
+import { useRoute } from 'vue-router'
 import AppHeader from '@/components/layout/AppHeader.vue'
-import AppFooter from '@/components/layout/AppFooter.vue' // 简单页脚组件
+import AppFooter from '@/components/layout/AppFooter.vue'
+
+const route = useRoute()
+const hideHeader = computed(() => !!route.meta?.hideHeader)
+const hideFooter = computed(() => !!route.meta?.hideFooter)
 </script>
 
 <style>

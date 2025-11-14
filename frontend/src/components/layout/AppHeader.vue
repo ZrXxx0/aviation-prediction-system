@@ -13,7 +13,14 @@
       <el-menu-item index="/dashboard">数据看板</el-menu-item>
       <el-menu-item index="/forecast">预测模块</el-menu-item>
       <el-menu-item index="/management">数据管理</el-menu-item>
+      <!-- <el-menu-item index="/administration">系统管理</el-menu-item> -->
     </el-menu>
+
+    <!-- 系统管理齿轮图标（靠右） -->
+    <el-button class="sys-btn" type="text" @click="goSystem" title="系统管理">
+      <el-icon><setting /></el-icon>
+    </el-button>
+
     <el-dropdown class="user-section" trigger="click">
       <span class="el-dropdown-link">
         <span style="margin-right: 25px; font-size: 0.8rem; color: #ecf0f1; letter-spacing: 1px;">
@@ -36,7 +43,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowDown } from '@element-plus/icons-vue'
+import { ArrowDown, Setting } from '@element-plus/icons-vue'
 
 const userName = ref('管理员')
 const route = useRoute()
@@ -70,6 +77,11 @@ function handleLogout() {
   // 这里可以添加实际的登出逻辑，如清除 token、跳转登录页等
   // router.push('/login')
 }
+
+function goSystem() {
+  // 跳转到系统管理页面（请确保路由已配置）
+  router.push('/administration')
+}
 </script>
 
 <style scoped>
@@ -95,6 +107,21 @@ function handleLogout() {
   background: transparent;
   border-bottom: none;
 }
+
+/* 齿轮按钮样式 */
+.sys-btn {
+  color: #ecf0f1;
+  margin-right: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.sys-btn:hover {
+  color: #ffffff;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+}
+
 .user-section {
   display: flex;
   align-items: center;

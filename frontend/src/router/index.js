@@ -2,12 +2,19 @@ import { createRouter, createWebHistory } from 'vue-router'
 import DashboardView from '@/views/DashboardView.vue'
 import ForecastView from '@/views/ForecastView.vue'
 import ManagementView from '@/views/ManagementView.vue'
-import ForecastManager from '@/views/ForecastManager.vue'
+import AdministrationView from '@/views/AdministrationView.vue'
+import LoginView from '@/views/LoginView.vue'
 
 const routes = [
     {
         path: '/',
-        redirect: '/dashboard'
+        redirect: '/login'
+    },
+    {
+        path: '/login',
+        name: 'Login',
+        component: LoginView,
+        meta: { hideHeader: true, hideFooter: true }
     },
     {
         path: '/dashboard',
@@ -24,7 +31,15 @@ const routes = [
         name: 'management',
         component: ManagementView
     }
-    
+    ,
+    {
+        path: '/administration',
+        name: 'administration',
+        component: AdministrationView
+    },
+    { 
+        path: '/:pathMatch(.*)*', 
+        redirect: '/' }
 ]
 
 const router = createRouter({
