@@ -12,15 +12,10 @@
       <el-table :data="users" stripe style="width:100%">
         <el-table-column prop="username" label="用户名" width="180" />
         <el-table-column prop="email" label="邮箱" />
-        <el-table-column label="角色/权限" width="260">
+        <el-table-column label="角色" width="180">
           <template #default="scope">
-            <el-tag
-              v-for="role in scope.row.roles"
-              :key="scope.row.id + '-' + role"
-              type="info"
-              style="margin-right:6px;"
-            >
-              {{ role }}
+            <el-tag type="info">
+              {{ scope.row.role_display || '未分配' }}
             </el-tag>
           </template>
         </el-table-column>
@@ -51,14 +46,22 @@
           <el-input v-model="form.password" type="password" autocomplete="new-password" />
         </el-form-item>
 
-        <el-form-item label="角色" prop="roles">
-          <el-checkbox-group v-model="form.roles">
-            <el-checkbox v-for="r in availableRoles" :key="r" :label="r">{{ r }}</el-checkbox>
-          </el-checkbox-group>
+        <el-form-item label="角色" prop="role_id">
+          <el-select v-model="form.role_id" placeholder="请选择角色" style="width: 100%">
+            <el-option
+              v-for="role in availableRoles"
+              :key="role.id"
+              :label="role.display_name"
+              :value="role.id"
+            >
+              <span>{{ role.display_name }}</span>
+              <span style="color: #8492a6; font-size: 13px; margin-left: 8px;">{{ role.description }}</span>
+            </el-option>
+          </el-select>
         </el-form-item>
 
-        <el-form-item label="说明">
-          <el-input v-model="form.note" placeholder="可选：用户备注" />
+        <el-form-item label="手机号">
+          <el-input v-model="form.phone" placeholder="可选：手机号码" />
         </el-form-item>
       </el-form>
 
@@ -80,12 +83,12 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import apiConfig from '@/config/api.js'
 
 const users = ref([])
-const availableRoles = ref(['administrator', 'manager', 'viewer']) // 可扩展/从后端加载
+const availableRoles = ref([])
 const showDialog = ref(false)
 const showDeleteConfirm = ref(false)
 const isEditing = ref(false)
@@ -99,64 +102,111 @@ const form = reactive({
   username: '',
   email: '',
   password: '',
-  roles: [],
-  note: ''
+  role_id: null,
+  phone: ''
 })
 
-const rules = {
+// 基础验证规则
+const baseRules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  email: [{ required: true, message: '请输入邮箱', trigger: 'blur' }],
-  // password 在创建时必填
-  password: [{ required: !isEditing.value, message: '请输入密码', trigger: 'blur' }]
+  email: [
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
+    { type: 'email', message: '请输入有效的邮箱地址', trigger: 'blur' }
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 6, message: '密码长度不能少于6位', trigger: 'blur' }
+  ]
+}
+
+// 根据编辑模式动态返回验证规则
+const rules = computed(() => {
+  if (isEditing.value) {
+    // 编辑模式下，密码不是必填的
+    const editRules = { ...baseRules }
+    delete editRules.password
+    return editRules
+  }
+  return baseRules
+})
+
+// 加载角色列表
+async function loadRoles() {
+  try {
+    const url = apiConfig.getUrl(apiConfig.endpoints.AUTH.ROLES)
+    const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token')
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const data = await res.json()
+    if (data && data.success && Array.isArray(data.data)) {
+      availableRoles.value = data.data
+    }
+  } catch (e) {
+    console.error('加载角色失败:', e)
+    ElMessage.error('加载角色列表失败')
+  }
 }
 
 // 加载用户列表
 async function loadUsers() {
   try {
-    // 使用 apiConfig 管理的端点（请在 api.js 中定义 ENDPOINTS.ADMIN.LIST_USERS）
-    const url = apiConfig.getUrl?.(apiConfig.endpoints?.ADMIN?.LIST_USERS || '/admin/users/')
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const url = apiConfig.getUrl(apiConfig.endpoints.ADMIN.LIST_USERS)
+    const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token')
+    const res = await fetch(url, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    if (!res.ok) {
+      if (res.status === 403) {
+        ElMessage.error('无权限访问用户管理')
+        return
+      }
+      throw new Error(`HTTP ${res.status}`)
+    }
     const data = await res.json()
-    // 假设后端返回 { success: true, data: { users: [...] } }
-    if (data && data.success && Array.isArray(data.data?.users)) {
-      users.value = data.data.users
-    } else if (data && Array.isArray(data.users)) {
-      // 兼容不同后端字段
-      users.value = data.users
+    if (data && data.success && Array.isArray(data.data)) {
+      users.value = data.data
     } else {
-      // 后端未实现，使用 mock
-      users.value = [
-        { id: 1, username: 'admin', email: 'admin@example.com', roles: ['administrator'], note: '超级管理员' },
-        // { id: 2, username: 'alice', email: 'alice@example.com', roles: ['editor'], note: '' }
-      ]
+      users.value = []
     }
   } catch (e) {
     console.error('加载用户失败:', e)
-    ElMessage.warning('加载用户失败，已显示本地示例数据')
-    users.value = [
-      { id: 1, username: 'admin', email: 'admin@example.com', roles: ['administrator'], note: '超级管理员' },
-    ]
+    ElMessage.error('加载用户列表失败：' + (e.message || '未知错误'))
+    users.value = []
   }
 }
 
 // 打开新增弹窗
-function openAddDialog() {
+async function openAddDialog() {
   isEditing.value = false
   resetForm()
   showDialog.value = true
+  // 清除之前的验证状态
+  await nextTick()
+  formRef.value?.clearValidate?.()
 }
 
 // 打开编辑弹窗
-function openEditDialog(user) {
+async function openEditDialog(user) {
   isEditing.value = true
   form.id = user.id
   form.username = user.username
   form.email = user.email || ''
-  form.password = '' // 不显示旧密码
-  form.roles = Array.isArray(user.roles) ? [...user.roles] : []
-  form.note = user.note || ''
+  form.password = '' // 编辑时不显示旧密码，不填则不修改
+  form.role_id = user.role_id || null
+  form.phone = user.phone || ''
+  
   showDialog.value = true
+  // 清除之前的验证状态
+  await nextTick()
+  formRef.value?.clearValidate?.()
 }
 
 function resetForm() {
@@ -164,53 +214,78 @@ function resetForm() {
   form.username = ''
   form.email = ''
   form.password = ''
-  form.roles = []
-  form.note = ''
+  form.role_id = null
+  form.phone = ''
   // reset validation if needed
   formRef.value?.clearValidate?.()
 }
 
 // 提交新增/编辑
 async function submitForm() {
-  await formRef.value.validate().catch(() => { throw new Error('验证失败') })
+  // 验证表单（rules 已经是响应式的，会根据 isEditing 自动调整）
+  try {
+    await formRef.value.validate()
+  } catch (error) {
+    // 验证失败，不继续执行
+    return
+  }
+  
   saving.value = true
   try {
+    const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token')
+    const headers = {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    }
+    
     if (isEditing.value) {
-      // 编辑：PUT /admin/users/:id/
-      const endpoint = apiConfig.endpoints?.ADMIN?.UPDATE_USER || '/admin/users/{id}/'
-      const url = apiConfig.getUrl?.(endpoint.replace('{id}', String(form.id))) || `/admin/users/${form.id}/`
+      // 编辑：PUT /auth/users/:id/ (不包含密码字段)
+      const url = apiConfig.getUrl(apiConfig.endpoints.ADMIN.UPDATE_USER.replace('{id}', String(form.id)))
+      const payload = {
+        username: form.username,
+        email: form.email,
+        role_id: form.role_id,
+        phone: form.phone
+      }
+      
       const res = await fetch(url, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          username: form.username,
-          email: form.email,
-          roles: form.roles,
-          note: form.note
-        })
+        headers,
+        body: JSON.stringify(payload)
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data = await res.json()
-      if (!(data && data.success)) throw new Error('保存失败')
+      if (!res.ok || !(data && data.success)) {
+        // 处理验证错误
+        let errorMsg = data.message || '保存失败'
+        if (data.errors) {
+          const errorDetails = Object.values(data.errors).flat().join('; ')
+          if (errorDetails) {
+            errorMsg += ': ' + errorDetails
+          }
+        }
+        throw new Error(errorMsg)
+      }
       ElMessage.success('用户已更新')
     } else {
-      // 创建：POST /admin/users/
-      const endpoint = apiConfig.endpoints?.ADMIN?.CREATE_USER || '/admin/users/'
-      const url = apiConfig.getUrl?.(endpoint) || '/admin/users/'
+      // 创建：POST /auth/users/
+      const url = apiConfig.getUrl(apiConfig.endpoints.ADMIN.CREATE_USER)
       const res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           username: form.username,
           email: form.email,
           password: form.password,
-          roles: form.roles,
-          note: form.note
+          role_id: form.role_id,
+          phone: form.phone
         })
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.message || `HTTP ${res.status}`)
+      }
       const data = await res.json()
-      if (!(data && data.success)) throw new Error('创建失败')
+      if (!(data && data.success)) throw new Error(data.message || '创建失败')
       ElMessage.success('用户创建成功')
     }
 
@@ -234,12 +309,21 @@ async function deleteUser() {
   if (!targetUser.value) return
   deleting.value = true
   try {
-    const endpoint = apiConfig.endpoints?.ADMIN?.DELETE_USER || '/admin/users/{id}/'
-    const url = apiConfig.getUrl?.(endpoint.replace('{id}', String(targetUser.value.id))) || `/admin/users/${targetUser.value.id}/`
-    const res = await fetch(url, { method: 'DELETE' })
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token')
+    const url = apiConfig.getUrl(apiConfig.endpoints.ADMIN.DELETE_USER.replace('{id}', String(targetUser.value.id)))
+    const res = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    })
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}))
+      throw new Error(errorData.message || `HTTP ${res.status}`)
+    }
     const data = await res.json()
-    if (!(data && data.success)) throw new Error('删除失败')
+    if (!(data && data.success)) throw new Error(data.message || '删除失败')
     ElMessage.success('用户已删除')
     showDeleteConfirm.value = false
     await loadUsers()
@@ -252,6 +336,7 @@ async function deleteUser() {
 }
 
 onMounted(() => {
+  loadRoles()
   loadUsers()
 })
 </script>

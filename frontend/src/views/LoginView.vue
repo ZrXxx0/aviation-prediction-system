@@ -81,8 +81,15 @@ async function onSubmit() {
 
     if (data && data.success && data.data?.token) {
       const token = data.data.token
-      if (form.remember) localStorage.setItem('auth_token', token)
-      else sessionStorage.setItem('auth_token', token)
+      const userInfo = data.data.user
+      
+      // 保存token和用户信息
+      const { setToken, setUserInfo } = await import('@/utils/auth')
+      setToken(token, form.remember)
+      if (userInfo) {
+        setUserInfo(userInfo, form.remember)
+      }
+      
       ElMessage.success('登录成功')
       router.replace({ path: '/dashboard' })
     } else {

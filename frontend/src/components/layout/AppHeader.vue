@@ -11,13 +11,12 @@
       router
     >
       <el-menu-item index="/dashboard">数据看板</el-menu-item>
-      <el-menu-item index="/forecast">预测模块</el-menu-item>
-      <el-menu-item index="/management">数据管理</el-menu-item>
-      <!-- <el-menu-item index="/administration">系统管理</el-menu-item> -->
+      <el-menu-item v-if="canViewForecast" index="/forecast">预测模块</el-menu-item>
+      <el-menu-item v-if="canViewManagement" index="/management">数据管理</el-menu-item>
     </el-menu>
 
-    <!-- 系统管理齿轮图标（靠右） -->
-    <el-button class="sys-btn" type="text" @click="goSystem" title="系统管理">
+    <!-- 系统管理齿轮图标（靠右）- 只有超级管理员可见 -->
+    <el-button v-if="canViewAdministration" class="sys-btn" type="text" @click="goSystem" title="系统管理">
       <el-icon><setting /></el-icon>
     </el-button>
 
@@ -44,12 +43,28 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowDown, Setting } from '@element-plus/icons-vue'
+import { getUserInfo, clearAuth, canViewAdministration as checkAdmin, canViewForecast as checkForecast, canViewManagement as checkManagement } from '@/utils/auth'
 
-const userName = ref('管理员')
+const userName = ref('游客')
 const route = useRoute()
 const router = useRouter()
 
 const currentRoute = computed(() => route.path)
+
+// 权限检查
+const canViewAdministration = computed(() => checkAdmin())
+const canViewForecast = computed(() => checkForecast())
+const canViewManagement = computed(() => checkManagement())
+
+// 加载用户信息
+function loadUserInfo() {
+  const userInfo = getUserInfo()
+  if (userInfo) {
+    userName.value = userInfo.username || userInfo.email || '用户'
+  } else {
+    userName.value = '游客'
+  }
+}
 
 // 实时时间逻辑
 const currentTime = ref('')
@@ -67,15 +82,35 @@ function updateTime() {
 onMounted(() => {
   updateTime()
   timer = setInterval(updateTime, 1000)
+  loadUserInfo()
 })
 onUnmounted(() => {
   if (timer) clearInterval(timer)
 })
 
-function handleLogout() {
-  ElMessage.success('已退出登录')
-  // 这里可以添加实际的登出逻辑，如清除 token、跳转登录页等
-  // router.push('/login')
+async function handleLogout() {
+  try {
+    // 调用后端登出接口（可选）
+    const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token')
+    if (token) {
+      const apiConfig = await import('@/config/api.js')
+      const url = apiConfig.default.getUrl('/auth/logout/')
+      await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      }).catch(() => {}) // 忽略登出接口错误
+    }
+  } catch (e) {
+    console.error('登出请求失败:', e)
+  } finally {
+    // 清除本地认证信息
+    clearAuth()
+    ElMessage.success('已退出登录')
+    router.push('/login')
+  }
 }
 
 function goSystem() {
@@ -106,6 +141,20 @@ function goSystem() {
   margin-left: 3rem;
   background: transparent;
   border-bottom: none;
+}
+
+/* 隐藏 Element Plus 菜单的"更多"下拉菜单（当菜单项较少时自动显示的） */
+.nav-menu :deep(.el-sub-menu) {
+  display: none !important;
+}
+
+.nav-menu :deep(.el-menu--popup) {
+  display: none !important;
+}
+
+/* 确保菜单项正确显示 */
+.nav-menu :deep(.el-menu-item) {
+  display: inline-flex !important;
 }
 
 /* 齿轮按钮样式 */

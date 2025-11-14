@@ -161,14 +161,14 @@ Thumbs.db
 .env.production
 
 # 数据文件（如果需要）
-# *.csv
-# *.xlsx
-# *.json
+*.csv
+*.xlsx
+*.json
 
 # 模型文件（如果使用机器学习模型）
-# *.pkl
-# *.joblib
-# *.h5
+*.pkl
+*.joblib
+*.h5
 
 # 日志文件
 logs/

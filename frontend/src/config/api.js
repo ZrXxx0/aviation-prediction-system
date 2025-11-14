@@ -49,6 +49,20 @@ const API_ENDPOINTS = {
     UPLOAD_INSERT: '/predict/data/upload/insert/',
     UPLOAD_RESOLVE: '/predict/data/upload/resolve/',
   },
+  // 认证相关API
+  AUTH: {
+    LOGIN: '/auth/login/',
+    LOGOUT: '/auth/logout/',
+    USER_INFO: '/auth/user/info/',
+    ROLES: '/auth/roles/',
+  },
+  // 用户管理API（需要超级管理员权限）
+  ADMIN: {
+    LIST_USERS: '/auth/users/',
+    CREATE_USER: '/auth/users/',
+    UPDATE_USER: '/auth/users/{id}/',
+    DELETE_USER: '/auth/users/{id}/',
+  },
   // 其他API端点可以在这里添加
 };
 
