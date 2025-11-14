@@ -1,1 +1,6 @@
 backend/data_utils/*.csv
+*.pkl
+*.pdf
+*.csv
+*.json
+*.txt
