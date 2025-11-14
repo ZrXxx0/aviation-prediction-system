@@ -142,9 +142,9 @@ def get_forecast_models(request):
         
         if not models.exists():
             return JsonResponse({
-                'error': '未找到匹配的模型',
-                'message': f'未找到从 {origin_airport} 到 {destination_airport} 的 {time_granularity} 粒度预测模型'
-            }, status=404)
+                'success': True,
+                'data': None
+            })
         
         # 计算每个模型的综合评分（用于排序）
         model_list = []

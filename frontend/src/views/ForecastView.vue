@@ -378,6 +378,9 @@
               </template>
             </el-option>
           </el-select>
+          <div v-if="!loadingModels && monthlyModels.length === 0" style="margin-top:4px; color:#f56c6c; font-size:12px;">
+            未找到月度模型，请先训练模型
+          </div>
         </div>
         <div>
           <label style="font-weight:600;">季度模型</label>
@@ -399,6 +402,9 @@
               </template>
             </el-option>
           </el-select>
+          <div v-if="!loadingModels && quarterlyModels.length === 0" style="margin-top:4px; color:#f56c6c; font-size:12px;">
+            未找到季度模型，请先训练模型
+          </div>
         </div>
       </div>
       <div v-else>
@@ -420,6 +426,9 @@
             </template>
           </el-option>
         </el-select>
+        <div v-if="!loadingModels && models.length === 0" style="margin-top:8px; color:#f56c6c; font-size:12px;">
+          未找到可用的预测模型，请先训练模型
+        </div>
       </div>
       <!-- 经济数据预测方法 -->
       <div style="margin-top:16px;">
@@ -532,6 +541,7 @@ import axios from 'axios'
 import apiConfig from '@/config/api.js';
 import * as XLSX from 'xlsx'
 import { Download } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
 
 // 城市和省份数据结构
 const locationOptions = ref([])
@@ -632,7 +642,11 @@ async function fetchModels(granularity) {
     console.log('获取模型响应:', res.data)
 
     if (res.data.success) {
-      return res.data.data.models
+      // 如果没有数据，返回 null
+      if (res.data.data === null || res.data.data === undefined) {
+        return null
+      }
+      return res.data.data.models || []
     } else {
       console.error('获取模型失败:', res.data)
       return []
@@ -655,7 +669,8 @@ watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, gran
   const mappedGranularity = granularityMap[granularity] || 'monthly'
 
   loadingModels.value = true
-  models.value = await fetchModels(mappedGranularity)
+  const result = await fetchModels(mappedGranularity)
+  models.value = result === null ? [] : result
   loadingModels.value = false
 })
 
@@ -663,8 +678,10 @@ watch([selectedFrom, selectedTo, timeRange, numFeatures], async ([from, to, gran
 watch(hierarchicalMode, async (val) => {
   if (val) {
     loadingModels.value = true
-    monthlyModels.value = await fetchModels('monthly')
-    quarterlyModels.value = await fetchModels('quarterly')
+    const monthlyResult = await fetchModels('monthly')
+    const quarterlyResult = await fetchModels('quarterly')
+    monthlyModels.value = monthlyResult === null ? [] : monthlyResult
+    quarterlyModels.value = quarterlyResult === null ? [] : quarterlyResult
     loadingModels.value = false
   }
 })
@@ -685,10 +702,16 @@ async function openModelDialog() {
   hierarchicalMode.value = false
   showModelDialog.value = true
   loadingModels.value = true
-  models.value = await fetchModels(
+  const result = await fetchModels(
     { '年度': 'yearly', '季度': 'quarterly', '月度': 'monthly' }[timeRange.value] || 'monthly'
   )
+  models.value = result === null ? [] : result
   loadingModels.value = false
+  
+  // 如果没有模型数据，显示提示
+  if (result === null) {
+    ElMessage.warning(`未找到从 ${selectedFrom.value[2]} 到 ${selectedTo.value[2]} 的 ${timeRange.value} 粒度预测模型，请先训练模型`)
+  }
 }
 
 // 确认选择模型并添加任务
@@ -1075,14 +1098,24 @@ async function loadHistoryPredictions(origin, destination, granularity) {
       timeout: 10000
     })
     console.log('历史预测结果:', res)
-    if (res.data?.success && res.data.data?.models && Array.isArray(res.data.data.models)) {
-      historyPredictions.value = res.data.data.models.map(item => ({
-        date: item.train_end_time,    // 使用训练结束时间
-        model: item.model_id,
-        mae: item.test_mae,
-        mape: item.test_mape,
-        rmse: item.test_rmse
-      }))
+    if (res.data?.success) {
+      // 如果没有数据，返回空数组
+      if (res.data.data === null || res.data.data === undefined) {
+        historyPredictions.value = []
+        return
+      }
+      if (res.data.data?.models && Array.isArray(res.data.data.models)) {
+        historyPredictions.value = res.data.data.models.map(item => ({
+          date: item.train_end_time,    // 使用训练结束时间
+          model: item.model_id,
+          mae: item.test_mae,
+          mape: item.test_mape,
+          rmse: item.test_rmse
+        }))
+      } else {
+        console.warn('格式异常', res)
+        historyPredictions.value = []
+      }
     } else {
       console.warn('格式异常', res)
       historyPredictions.value = []
