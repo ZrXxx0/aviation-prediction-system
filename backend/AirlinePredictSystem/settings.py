@@ -50,9 +50,13 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'accounts',  # 用户认证应用
     'show',
     'predict',
 ]
+
+# 使用自定义User模型
+AUTH_USER_MODEL = 'accounts.User'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -145,7 +149,11 @@ CORS_ALLOWED_ORIGINS = [
 # REST Framework配置
 REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.AllowAny',
+        'rest_framework.permissions.AllowAny',  # 默认允许所有访问，各API自行设置权限
+    ],
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'accounts.middleware.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ],
     'DEFAULT_RENDERER_CLASSES': [
         'rest_framework.renderers.JSONRenderer',

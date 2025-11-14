@@ -15,7 +15,7 @@ from django.db import transaction
 from django.utils.timezone import make_aware
 
 # ========= Django 初始化 =========
-PROJECT_ROOT = r"D:\desk\project\backend"  # 项目根目录（manage.py 所在）
+PROJECT_ROOT = r"D:\Desktop\科研工作\科研工作ing\航空市场需求分析\AirlineSystem\backend"  # 项目根目录（manage.py 所在）
 sys.path.append(PROJECT_ROOT)
 
 import django

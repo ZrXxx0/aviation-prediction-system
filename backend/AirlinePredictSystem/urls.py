@@ -19,6 +19,7 @@ from django.urls import path, include
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('auth/', include('accounts.urls')),  # 认证相关路由
     path('show/', include('show.urls')),
     path('predict/', include('predict.urls')),
 ]
