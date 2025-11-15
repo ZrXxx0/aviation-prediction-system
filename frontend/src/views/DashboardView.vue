@@ -5,7 +5,7 @@
       <div class="left-panel">
         <div class="panel-title" style="margin-top: -15px">
           <Decoration1 :color="['#46bee9', '#46bee9']" style="width:200px;height:50px;" />
-          <h2>全国航线实时分布</h2>
+          <h2>全国航线数据统计</h2>
         </div>
 
         <div class="filters">
@@ -73,7 +73,7 @@
       <!-- 右侧面板 - 统计信息 -->
       <div class="right-panel">
         <div class="panel-title">
-          <Decoration7 style="width:250px;height:30px;">&emsp;航班统计分析&emsp;</Decoration7>
+          <Decoration7 style="width:250px;height:30px;">&emsp;航线统计分析&emsp;</Decoration7>
         </div>
 
         <div class="filters">
@@ -137,7 +137,7 @@
 
         <div class="bar-chart-container">
           <div class="bar-chart-header">
-            <div class="chart-title">航班统计指标趋势</div>
+            <div class="chart-title">航线数据趋势分析</div>
             <div style=" text-align: center;">
               <label style="margin-left: 5px; color: #7cb9e8;">时间周期：</label>
               <el-input-number v-model="month_number" :min="3" :max="24" @change="handleTimePeriodChange" >
@@ -1367,7 +1367,7 @@ const renderFleetChart = () => {
 
   const option = {
     title: {
-      text: '机队分布',
+      text: '座级分布',
       left: 'left',
       textStyle: {
         color: '#2B7BD6',
@@ -1403,7 +1403,7 @@ const renderFleetChart = () => {
     },
     series: [
       {
-        name: '机队分布',
+        name: '座级分布',
         type: 'pie',
         radius: [20, 110],
         center: ['50%', '50%'],

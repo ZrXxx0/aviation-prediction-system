@@ -1,6 +1,6 @@
 <template>
   <el-header height="64px" class="app-header">
-    <div class="logo">航空市场需求分析预测</div>
+    <div class="logo">航空市场需求分析工具</div>
     <el-menu
       mode="horizontal"
       :default-active="currentRoute"

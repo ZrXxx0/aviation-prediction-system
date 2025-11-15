@@ -1,7 +1,7 @@
 <template>
   <div class="admin-container">
     <div class="admin-header">
-      <h2>系统管理 - 用户与权限</h2>
+      <h2>用户与权限管理</h2>
       <div class="actions">
         <el-button type="primary" icon="el-icon-plus" @click="openAddDialog">新增用户</el-button>
         <el-button type="default" @click="loadUsers">刷新</el-button>
