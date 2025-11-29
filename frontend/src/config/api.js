@@ -11,7 +11,7 @@ const API_CONFIG = {
     timeout: 10000,
   },
   production: {
-    baseURL: 'https://airlinemarket.online/api/', // 生产环境服务器地址
+    baseURL: 'http://localhost:8000', // 生产环境服务器地址
     timeout: 15000,
   },
   staging: {
