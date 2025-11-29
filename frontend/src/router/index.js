@@ -1,7 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import DashboardView from '@/views/DashboardView.vue'
-import ForecastView from '@/views/ForecastView.vue'
+import ForecastRunView from '@/views/ForecastRunView.vue'
+import DataShowView from '@/views/DataShowView.vue'
+import ModelTrainView from '@/views/ModelTrainView.vue'
 import ManagementView from '@/views/ManagementView.vue'
 import AdministrationView from '@/views/AdministrationView.vue'
 import LoginView from '@/views/LoginView.vue'
@@ -22,12 +24,31 @@ const routes = [
         path: '/dashboard',
         name: 'Dashboard',
         component: DashboardView,
-        meta: { requiresAuth: false } // 数据看板所有用户都可以访问
+        meta: { requiresAuth: false }
     },
+    // Forecast 模块拆成独立页面
     {
         path: '/forecast',
         name: 'Forecast',
-        component: ForecastView,
+        redirect: '/forecast/show',
+        meta: { requiresAuth: true, requiresPermission: 'view_forecast' }
+    },
+    {
+        path: '/forecast/show',
+        name: 'ForecastShow',
+        component: DataShowView,
+        meta: { requiresAuth: true, requiresPermission: 'view_forecast' }
+    },
+    {
+        path: '/forecast/run',
+        name: 'ForecastRun',
+        component: ForecastRunView,
+        meta: { requiresAuth: true, requiresPermission: 'view_forecast' }
+    },
+    {
+        path: '/forecast/train',
+        name: 'ForecastTrain',
+        component: ModelTrainView,
         meta: { requiresAuth: true, requiresPermission: 'view_forecast' }
     },
     {
@@ -44,7 +65,8 @@ const routes = [
     },
     { 
         path: '/:pathMatch(.*)*', 
-        redirect: '/' }
+        redirect: '/' 
+    }
 ]
 
 const router = createRouter({
@@ -52,25 +74,25 @@ const router = createRouter({
     routes
 })
 
-// 路由守卫
+// 路由守卫（保持和你现有逻辑一致）
 router.beforeEach((to, from, next) => {
     const token = getToken()
-    
-    // 如果访问登录页且已登录，重定向到看板
-    if (to.path === '/login' && token) {
+
+    const normalize = (p) => (p !== '/' && p.endsWith('/') ? p.slice(0, -1) : p)
+    const path = normalize(to.path)
+
+    if (path === '/login' && token) {
         next('/dashboard')
         return
     }
-    
-    // 检查是否需要认证
+
     if (to.meta.requiresAuth) {
         if (!token) {
             ElMessage.warning('请先登录')
             next('/login')
             return
         }
-        
-        // 检查权限
+
         const permission = to.meta.requiresPermission
         if (permission === 'view_forecast' && !canViewForecast()) {
             ElMessage.error('您没有权限访问此页面')
@@ -88,7 +110,7 @@ router.beforeEach((to, from, next) => {
             return
         }
     }
-    
+
     next()
 })
 

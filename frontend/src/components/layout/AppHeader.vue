@@ -1,6 +1,7 @@
 <template>
   <el-header height="64px" class="app-header">
     <div class="logo">航空市场需求分析工具</div>
+
     <el-menu
       mode="horizontal"
       :default-active="currentRoute"
@@ -11,23 +12,31 @@
       router
     >
       <el-menu-item index="/dashboard">数据看板</el-menu-item>
-      <el-menu-item v-if="canViewForecast" index="/forecast">预测模块</el-menu-item>
+
+      <!-- Forecast 菜单改为含子项的下拉（保持权限控制） -->
+      <el-sub-menu v-if="canViewForecast" index="/forecast/show">
+        <template #title>
+          <span>数据预测</span>
+        </template>
+        <el-menu-item index="/forecast/show">预测结果</el-menu-item>
+        <el-menu-item index="/forecast/run">运行预测</el-menu-item>
+        <el-menu-item index="/forecast/train">模型训练</el-menu-item>
+      </el-sub-menu>
+
       <el-menu-item v-if="canViewManagement" index="/management">数据管理</el-menu-item>
     </el-menu>
 
     <!-- 系统管理齿轮图标（靠右）- 只有超级管理员可见 -->
     <el-button v-if="canViewAdministration" class="sys-btn" type="text" @click="goSystem" title="系统管理">
-      <el-icon><setting /></el-icon>
+      <el-icon><Setting /></el-icon>
     </el-button>
 
     <el-dropdown class="user-section" trigger="click">
       <span class="el-dropdown-link">
-        <span style="margin-right: 25px; font-size: 0.8rem; color: #ecf0f1; letter-spacing: 1px;">
-          {{ currentTime }}
-        </span>
-        <el-avatar size="small" style="margin-right: 8px; background: #3498db;">{{ userName[0] }}</el-avatar>
+        <span class="current-time">{{ currentTime }}</span>
+        <el-avatar size="small" style="margin: 0 8px 0 12px; background: #3498db;">{{ userName[0] }}</el-avatar>
         {{ userName }}
-        <el-icon style="margin-left: 4px;"><arrow-down /></el-icon>
+        <el-icon style="margin-left: 6px;"><ArrowDown /></el-icon>
       </span>
       <template #dropdown>
         <el-dropdown-menu>
@@ -90,7 +99,6 @@ onUnmounted(() => {
 
 async function handleLogout() {
   try {
-    // 调用后端登出接口（可选）
     const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token')
     if (token) {
       const apiConfig = await import('@/config/api.js')
@@ -101,12 +109,11 @@ async function handleLogout() {
           'Authorization': `Bearer ${token}`,
           'Content-Type': 'application/json'
         }
-      }).catch(() => {}) // 忽略登出接口错误
+      }).catch(() => {})
     }
   } catch (e) {
     console.error('登出请求失败:', e)
   } finally {
-    // 清除本地认证信息
     clearAuth()
     ElMessage.success('已退出登录')
     router.push('/login')
@@ -114,7 +121,6 @@ async function handleLogout() {
 }
 
 function goSystem() {
-  // 跳转到系统管理页面（请确保路由已配置）
   router.push('/administration')
 }
 </script>
@@ -132,35 +138,36 @@ function goSystem() {
   height: 64px;
 }
 .logo {
-  font-size: 1.5rem;
-  font-weight: bold;
+  font-size: 1.25rem;
+  font-weight: 700;
   color: #fff;
 }
+
+/* 菜单区域 */
 .nav-menu {
   flex: 1;
-  margin-left: 3rem;
+  margin-left: 2.5rem;
   background: transparent;
   border-bottom: none;
 }
 
-/* 隐藏 Element Plus 菜单的"更多"下拉菜单（当菜单项较少时自动显示的） */
-.nav-menu :deep(.el-sub-menu) {
-  display: none !important;
+/* 子菜单样式：保持与主菜单一致色调并在 hover/active 展示 */
+.nav-menu ::v-deep(.el-sub-menu__title) {
+  color: #ecf0f1;
+  padding: 0 14px;
+  height: 64px;
+  display: inline-flex;
+  align-items: center;
 }
-
-.nav-menu :deep(.el-menu--popup) {
-  display: none !important;
-}
-
-/* 确保菜单项正确显示 */
-.nav-menu :deep(.el-menu-item) {
-  display: inline-flex !important;
+.nav-menu ::v-deep(.el-menu-item),
+.nav-menu ::v-deep(.el-sub-menu__title) {
+  font-size: 14px;
 }
 
 /* 齿轮按钮样式 */
 .sys-btn {
   color: #ecf0f1;
-  margin-right: 15px;
+  margin-right: 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -171,10 +178,17 @@ function goSystem() {
   border-radius: 4px;
 }
 
+/* 用户区样式 */
 .user-section {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   cursor: pointer;
+}
+.current-time {
+  margin-right: 18px;
+  font-size: 0.85rem;
+  color: #ecf0f1;
+  letter-spacing: 1px;
 }
 </style>

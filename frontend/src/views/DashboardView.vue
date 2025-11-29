@@ -805,6 +805,8 @@ const renderMap = () => {
       zoom: 1.2,
       label: {emphasis: {show: false}},
       roam: true,
+      // itemStyle: {normal: {areaColor: '#1067b3', borderColor: '#ece8e8'}, emphasis: {areaColor: '#2a333d'}}
+      //地图颜色
       itemStyle: {normal: {areaColor: '#2a333d', borderColor: '#ece8e8'}, emphasis: {areaColor: '#1067b3'}}
     },
     series: [
