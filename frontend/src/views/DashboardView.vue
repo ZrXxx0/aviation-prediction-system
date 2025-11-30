@@ -105,7 +105,7 @@
 
         <div class="stats-cards">
           <div class="stat-card">
-            <h3>🛫 总运力</h3>
+            <h3>🛫 总座次</h3>
             <div class="value">{{ filteredStats.capacity.toLocaleString() }}</div>
             <div class="unit">万 人次/月</div>
           </div>
@@ -1120,7 +1120,7 @@ const renderCubeBarChart = () => {
       }
     },
     legend: {
-      data: ['运力', '运量', '航班数量'],
+      data: ['座次', '运量', '航班数量'],
       textStyle: { color: '#052233' },
       top: 10
     },
@@ -1162,7 +1162,7 @@ const renderCubeBarChart = () => {
     ],
     series: [
       {
-        name: '运力',
+        name: '座次',
         type: 'line',
         yAxisIndex: 0,
         data: capacityData,
