@@ -160,7 +160,7 @@
                 <el-tooltip
                   effect="dark"
                   placement="right"
-                  :content="`MAE: ${m.test_mae}, RMSE: ${m.test_rmse}, MAPE: ${m.test_mape}, R²: ${m.test_r2}`"
+                  :content="`MAE: ${m.train_mae}, RMSE: ${m.train_rmse}, MAPE: ${m.train_mape}, R²: ${m.train_r2}`"
                 >
                   <span>{{ m.model_id }}</span>
                 </el-tooltip>
@@ -184,7 +184,7 @@
                 <el-tooltip
                   effect="dark"
                   placement="right"
-                  :content="`MAE: ${m.test_mae}, RMSE: ${m.test_rmse}, MAPE: ${m.test_mape}, R²: ${m.test_r2}`"
+                  :content="`MAE: ${m.train_mae}, RMSE: ${m.train_rmse}, MAPE: ${m.train_mape}, R²: ${m.train_r2}`"
                 >
                   <span>{{ m.model_id }}</span>
                 </el-tooltip>
@@ -598,7 +598,7 @@ function renderFromResults() {
 
   forecastResults.value.forEach(item => {
     const { model_info, prediction_results } = item.data || {}
-    const { origin_airport, destination_airport, model_type, test_mae, test_rmse, test_mape, test_r2 } = model_info || {}
+    const { origin_airport, destination_airport, model_type, train_mae, train_rmse, train_mape, train_r2 } = model_info || {}
     if (!prediction_results) return
     const hist = (prediction_results.historical_data || []).map(d => ({ ...d, type: 'train' }))
     const pred = (prediction_results.future_predictions || []).map(d => ({ ...d, type: 'predict' }))
@@ -635,10 +635,10 @@ function renderFromResults() {
     performance.push({
       route: `${origin_airport} → ${destination_airport}`,
       model: model_type,
-      mae: test_mae,
-      rmse: test_rmse,
-      mape: test_mape,
-      r2: test_r2
+      mae: train_mae,
+      rmse: train_rmse,
+      mape: train_mape,
+      r2: train_r2
     })
   })
 
