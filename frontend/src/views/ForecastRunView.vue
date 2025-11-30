@@ -264,7 +264,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onBeforeUnmount, watch, computed } from 'vue'
+import { ref, reactive, onMounted, onBeforeUnmount, watch } from 'vue'
 import * as echarts from 'echarts'
 import axios from 'axios'
 import apiConfig from '@/config/api.js'
@@ -341,6 +341,7 @@ const quarterlyModels = ref([])
 const showProcessing = ref(false)
 const chartRef = ref(null)
 let chartInstance = null
+let ro = null // ResizeObserver
 
 // 获取模型列表
 async function fetchModels(granularity) {
@@ -656,10 +657,33 @@ watch(showTrain, async () => {
 onMounted(() => {
   loadCityData()
   renderChart([], [])
-  window.addEventListener('resize', () => chartInstance?.resize())
+
+  // Ensure chart resizes when container or viewport changes
+  const onWinResize = () => chartInstance?.resize()
+  window.addEventListener('resize', onWinResize)
+
+  // use ResizeObserver to track chart container resize and trigger echarts.resize()
+  if (typeof ResizeObserver !== 'undefined') {
+    ro = new ResizeObserver(() => {
+      chartInstance?.resize()
+    })
+    // observe the chart wrapper so resize triggers when layout changes
+    if (chartRef.value) ro.observe(chartRef.value)
+    // also observe parent so that panel collapsing or flex changes trigger resize
+    const parent = chartRef.value && chartRef.value.parentElement
+    if (parent) ro.observe(parent)
+  }
+
+  // cleanup in onBeforeUnmount below
+  // note: chart initialized lazily in renderChart
 })
 
 onBeforeUnmount(() => {
+  if (ro) {
+    try { ro.disconnect() } catch (e) { /* ignore */ }
+    ro = null
+  }
+  try { window.removeEventListener('resize', () => chartInstance?.resize()) } catch (e) { /* ignore */ }
   chartInstance?.dispose()
   chartInstance = null
 })
@@ -667,60 +691,105 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .model-container {
-  padding: 1rem 2rem;
+  padding: 1rem;
   max-width: 1600px;
   margin: 0 auto;
+  box-sizing: border-box;
 }
 
+/* make container fill available viewport height with some top/bottom spacing */
 .forecast-container {
-  padding: 1rem 2rem;
+  padding: 0.5rem;
   width: 100%;
+  box-sizing: border-box;
+  min-height: calc(100vh - 80px);
 }
 
+/* use full height flex layout so right panel can stretch and chart can fill remaining space */
 .forecast-content {
   display: flex;
-  gap: 2rem;
+  gap: 1.25rem;
+  height: 100%;
+  box-sizing: border-box;
 }
 
+/* control panel: fixed width on wide screens, collapses on small */
 .control-panel {
   flex: 0 0 320px;
+  max-width: 320px;
   background: #fff;
   border-radius: 8px;
-  padding: 1rem 1.25rem;
+  padding: 1rem;
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  box-sizing: border-box;
+  overflow-y: auto;
 }
 
-.panel-title {
-  margin: 0 0 0.6rem 0;
-  font-size: 1.15rem;
-  font-weight: 600;
-  color: #2c3e50;
+/* allow control-panel to shrink on small screens */
+@media (max-width: 900px) {
+  .control-panel {
+    flex: 0 0 auto;
+    width: 100%;
+    max-width: none;
+  }
 }
 
+/* result area should take remaining space and be a column flex so chart and stats share vertical space */
+.result-area {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+/* header stays small, chart-area grows */
+.chart-header {
+  padding: 0.5rem 0.75rem;
+  background: #fff;
+  border-radius: 8px 8px 0 0;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+}
+
+/* chart-area must be flexible and allow ResizeObserver to detect size changes.
+   using min-height: 200px ensures usable height on very small screens */
+.chart-area {
+  background: #f8f9fa;
+  border-radius: 0 0 8px 8px;
+  padding: 8px;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 220px;
+  width: 100%;
+  overflow: hidden;
+}
+
+/* prediction stats should be visible but not force large height */
+.stat-card {
+  background: #fff;
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+  max-width: 100%;
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+
+/* form layout */
+.panel-title { margin: 0 0 0.6rem 0; font-size: 1.15rem; font-weight: 600; color: #2c3e50; }
 .form-group { margin-bottom: 1rem; }
 .form-group label { display: block; margin-bottom: 0.4rem; color: #34495e; font-weight: 600; }
-
-.large-select { width: 100%; min-width: 220px; box-sizing: border-box; }
-
+.large-select { width: 100%; min-width: 160px; box-sizing: border-box; }
 .button-row { display: flex; justify-content: space-between; gap: 4%; margin-top: 0.6rem; }
 .run-btn { width: 48%; display: inline-flex; justify-content: center; align-items: center; }
-
 .task-list { margin-top: 0.8rem; }
 .task-item { margin-bottom: 1rem; }
 .task-route { font-size: 1rem; font-weight: bold; }
 .task-config { font-size: 0.9rem; color: #7f8c8d; display: flex; justify-content: space-between; align-items: center; }
 
-.result-area { flex: 1; display: flex; flex-direction: column; gap: 1rem; }
-
-.chart-header { display: flex; align-items: center; justify-content: flex-start; padding: 0 0 0.6rem 8px; background: #fff; border-radius: 8px 8px 0 0; box-shadow: 0 2px 8px rgba(0,0,0,0.05); }
-.chart-area { height: 420px; background: #f8f9fa; border-radius: 0 0 8px 8px; padding: 8px; }
-
-.stat-card { background: #fff; border-radius: 8px; padding: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); max-width: 100%; overflow-x: auto; }
-.stat-card h3 { margin: 0 0 8px 0; color: #7f8c8d; font-size: 1rem; }
-.empty-wrap { padding: 24px; display: flex; justify-content: center; align-items: center; }
-
+/* small screens: stack content */
 @media (max-width: 900px) {
   .forecast-content { flex-direction: column; }
-  .control-panel { width: 100%; max-width: 100%; }
+  .chart-area { min-height: 300px; }
 }
 </style>
