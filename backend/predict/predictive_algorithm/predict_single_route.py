@@ -204,20 +204,53 @@ def predict_single_route(prediction_request):
         'last_complete_date': metadata.get('last_complete_date')
     }
 
-    # 构建历史数据
+    # 获取该航线历史数据中最后一个非0距离值（运力 = 座位数 * 距离）
+    distance_col = 'Distance (KM)'
+    route_distance = 1.0  # 默认值
+    if distance_col in latest_data.columns:
+        # 按日期排序，获取最后一个非0距离值
+        data_with_distance = latest_data[[date_col, distance_col]].copy()
+        data_with_distance = data_with_distance.sort_values(by=date_col)
+        # 获取非空且非0的距离值
+        non_zero_distances = data_with_distance[
+            (data_with_distance[distance_col].notna()) & 
+            (data_with_distance[distance_col] != 0)
+        ][distance_col]
+        if len(non_zero_distances) > 0:
+            route_distance = float(non_zero_distances.iloc[-1])
+        else:
+            print(f"警告: 航线 {origin_airport}-{destination_airport} 未找到非0距离信息，使用默认值 1.0")
+    else:
+        print(f"警告: 数据中未找到距离字段 '{distance_col}'，使用默认值 1.0")
+    
+    print(f"航线 {origin_airport}-{destination_airport} 的距离: {route_distance} KM")
+
+    # 构建历史数据（将座位数转换为运力：座位数 * 距离）
     historical_data = []
     for _, row in latest_data.iterrows():
+        seats_value = row[target_col] if pd.notna(row[target_col]) else None
+        if seats_value is not None:
+            # 运力 = 座位数 * 距离
+            capacity_value = int(seats_value * route_distance)
+        else:
+            capacity_value = None
         historical_data.append({
             'time_point': _fmt_label(row[date_col], time_granularity),
-            'value': int(row[target_col]) if pd.notna(row[target_col]) else None
+            'value': capacity_value
         })
 
-    # 构建未来预测数据
+    # 构建未来预测数据（将座位数转换为运力：座位数 * 距离）
     future_predictions = []
     for _, row in future_df.iterrows():
+        seats_value = row['Predicted'] if pd.notna(row['Predicted']) else None
+        if seats_value is not None:
+            # 运力 = 座位数 * 距离（使用历史数据的最后一个非0距离）
+            capacity_value = int(seats_value * route_distance)
+        else:
+            capacity_value = None
         future_predictions.append({
             'time_point': _fmt_label(row['YearMonth'], time_granularity),
-            'value': int(row['Predicted']) if pd.notna(row['Predicted']) else None
+            'value': capacity_value
         })
 
     # 返回结果
