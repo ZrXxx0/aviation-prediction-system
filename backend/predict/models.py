@@ -242,3 +242,71 @@ class PretrainRecord(models.Model):
 
     def __str__(self):
         return f"{self.origin}-{self.destination} [{self.time_granularity}] @ {self.train_datetime:%Y-%m-%d %H:%M}"
+
+
+class ForecastBase(models.Model):
+    origin = models.CharField(max_length=5)
+    destination = models.CharField(max_length=5)
+    forecast_date = models.DateField()  # 预测的时间点（如2024-06-01）
+
+    # 存储预测值
+    seats = models.FloatField(default=0)
+    ask = models.FloatField(default=0)  # Available Seat Kilometers
+
+    # 记录这次预测产生的批次时间，用于版本控制
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        abstract = True
+        unique_together = ('origin', 'destination', 'forecast_date')
+        indexes = [
+            models.Index(fields=['origin', 'destination', 'forecast_date']),
+        ]
+
+
+class ForecastMonthly(ForecastBase):
+    pass
+
+
+class ForecastQuarterly(ForecastBase):
+    pass
+
+
+class ForecastYearly(ForecastBase):
+    pass
+
+
+class ForecastUpdateLog(models.Model):
+    """
+    记录预测任务的运行状态、日志和重试次数
+    """
+    STATUS_CHOICES = (
+        (0, '待处理 (Pending)'),  # 初始状态，等待脚本读取
+        (1, '进行中 (Running)'),  # 脚本正在运行，锁定状态
+        (2, '成功 (Success)'),  # 运行完成且无误
+        (3, '失败 (Failed)'),  # 发生异常
+    )
+
+    status = models.IntegerField(choices=STATUS_CHOICES, default=0, help_text="当前任务状态")
+
+    # 时间记录
+    created_at = models.DateTimeField(auto_now_add=True, help_text="任务创建时间")
+    start_time = models.DateTimeField(null=True, blank=True, help_text="实际开始运行时间")
+    end_time = models.DateTimeField(null=True, blank=True, help_text="结束时间")
+
+    # 核心字段：记录重试次数，限制最大重试逻辑
+    retry_count = models.IntegerField(default=0, help_text="这是第几次重试 (0代表首次运行)")
+    parent_task = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL,
+                                    help_text="如果是重试任务，记录上一次失败的任务ID")
+
+    # 日志字段：保存脚本的 print 输出或报错信息
+    log_message = models.TextField(blank=True, null=True, help_text="运行日志")
+
+    class Meta:
+        # 保证 .first() 永远取到最新创建的那一条
+        ordering = ['-created_at']
+        verbose_name = "预测更新任务日志"
+        verbose_name_plural = "预测更新任务日志"
+
+    def __str__(self):
+        return f"Task {self.id} - {self.get_status_display()}"

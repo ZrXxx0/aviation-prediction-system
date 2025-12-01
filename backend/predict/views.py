@@ -15,7 +15,7 @@ from django.utils import timezone
 from typing import Optional
 import copy
 
-from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord
+from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord, ForecastUpdateLog
 from show.models import AirportInfo
 from .predictive_algorithm.pretrain_single_route import pretrain_single_route
 from .predictive_algorithm.predict_single_route import predict_single_route
@@ -1661,3 +1661,79 @@ def upload_resolve(request):
             'success': False,
             'message': f'服务器错误: {str(e)}'
         }, status=500)
+
+
+@api_view(['POST'])
+@csrf_exempt
+def trigger_update_forecast(request):
+    """
+    触发预测更新接口
+    逻辑：
+    1. 检查是否有正在运行的任务。
+    2. 如果有，且未超时 -> 返回“正在更新，请等待”。
+    3. 如果无，或已超时/失败 -> 创建新任务 -> 返回“开始更新” + “上次成功时间”。
+    """
+
+    # 设定超时阈值：例如 48 小时
+    # 如果一个任务跑了 48 小时还没结束，我们认为它已经死锁了
+    TIMEOUT_HOURS = 48
+
+    last_task = ForecastUpdateLog.objects.first()
+
+    # --- 1. 判断是否“拒绝更新” ---
+    can_update = True
+    reject_reason = ""
+
+    if last_task:
+        # 如果是 Pending 或 Running
+        if last_task.status in [0, 1]:
+            # 检查是否超时 (防止死锁)
+            time_since_start = timezone.now() - last_task.created_at
+            if time_since_start.total_seconds() < TIMEOUT_HOURS * 3600:
+                # 确实正在跑，且没超时
+                can_update = False
+                reject_reason = "任务正在进行中"
+            else:
+                # 超时了，视为死锁，允许覆盖更新（虽然它状态是1，但我们不管它了）
+                # 可选：顺手把它标记为失败，保持数据整洁
+                last_task.status = 3
+                last_task.log_message = "系统检测到超时死锁，强制标记为失败"
+                last_task.save()
+                can_update = True
+
+    # --- 2. 获取“上一次成功的时间”用于展示 ---
+    # 查找最近一条 status=2 的记录
+    last_success_task = ForecastUpdateLog.objects.filter(status=2).first()
+    last_success_str = "无历史记录"
+    if last_success_task and last_success_task.end_time:
+        # 格式化时间，例如 "2023-10-27 14:30"
+        last_success_str = last_success_task.end_time.strftime("%Y-%m-%d %H:%M")
+
+    # --- 3. 执行逻辑分支 ---
+
+    # 分支 A: 不可更新 (正在跑)
+    if not can_update:
+        return JsonResponse({
+            'code': 400,
+            'status': 'running',
+            'message': '系统正在进行预测更新，请耐心等待。',
+            'data': {
+                'start_time': last_task.created_at.strftime("%Y-%m-%d %H:%M")
+            }
+        })
+
+    # 分支 B: 可以更新 (闲置/失败/死锁复活)
+    else:
+        # 创建新任务
+        ForecastUpdateLog.objects.create(status=0)
+
+        return JsonResponse({
+            'code': 200,
+            'status': 'started',
+            'message': '更新请求已提交，系统开始计算。',
+            'data': {
+                'estimated_time': '约24小时',
+                'last_success_date': last_success_str,
+                'note': '在此期间，系统将展示上一次成功的预测数据。'
+            }
+        })
