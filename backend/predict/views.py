@@ -15,7 +15,7 @@ from django.utils import timezone
 from typing import Optional
 import copy
 
-from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord, ForecastUpdateLog
+from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord, ForecastUpdateLog,ForecastMonthly, ForecastQuarterly, ForecastYearly
 from show.models import AirportInfo
 from .predictive_algorithm.pretrain_single_route import pretrain_single_route
 from .predictive_algorithm.predict_single_route import predict_single_route
@@ -95,6 +95,166 @@ def clean_nan_values(data_dict):
         else:
             cleaned_data[key] = value
     return cleaned_data
+
+import re
+from datetime import datetime, date
+def attach_existing_ask_predictions(item):
+    """
+    根据 item 中的 model_info / prediction_results.future_predictions，
+    去 ForecastMonthly/Quarterly/Yearly 表里查已有 ASK，
+    并添加到 prediction_results.exit_predictions 中。
+
+    time_granularity 决定：
+      - 使用哪个 ForecastXXX 模型
+      - time_point 的解析规则（带“缓和模式”）
+    """
+    try:
+        model_info = item.get('model_info') or {}
+        pr = item.get('prediction_results') or {}
+
+        gran = model_info.get('time_granularity')
+        origin = model_info.get('origin_airport')
+        dest = model_info.get('destination_airport')
+
+        if not (gran and origin and dest):
+            return item
+
+        # 只看 future_predictions
+        future_list = pr.get('future_predictions') or []
+        time_points = [r.get('time_point') for r in future_list if r.get('time_point')]
+        if not time_points:
+            return item
+
+        # --------- 宽松解析 time_point -> forecast_date ----------
+        def tp_to_date(tp: str) -> date:
+            """
+            支持的例子：
+
+            yearly:
+              "2024"
+              "2024-1" / "2024-01"
+              "2024-1-1" / "2024-01-01"
+
+            quarterly:
+              "2024-Q1"
+              "2024-1" / "2024-4"  (按月份推所属季度)
+              "2024-01-01" 等完整日期（按月份推季度）
+
+            monthly:
+              "2024-06"
+              "2024-06-01"
+            """
+            s = tp.strip()
+
+            # ===== 月度 =====
+            if gran == 'monthly':
+                for fmt in ('%Y-%m', '%Y-%m-%d'):
+                    try:
+                        dt = datetime.strptime(s, fmt).date()
+                        return dt.replace(day=1)
+                    except ValueError:
+                        continue
+                raise ValueError(f'不支持的月度时间格式: {tp}')
+
+            # ===== 年度 =====
+            elif gran == 'yearly':
+                # 纯年份: "2024"
+                if s.isdigit() and len(s) == 4:
+                    return date(int(s), 1, 1)
+
+                # "2024-1-1" / "2024-01-01" 或 "2024-1" / "2024-01"
+                for fmt in ('%Y-%m-%d', '%Y-%m'):
+                    try:
+                        dt = datetime.strptime(s, fmt).date()
+                        return date(dt.year, 1, 1)
+                    except ValueError:
+                        continue
+
+                raise ValueError(f'不支持的年度时间格式: {tp}')
+
+            # ===== 季度 =====
+            elif gran == 'quarterly':
+                # 1) 新格式: "2024-Q1"
+                m = re.match(r'^(\d{4})-Q([1-4])$', s, re.IGNORECASE)
+                if m:
+                    year = int(m.group(1))
+                    q = int(m.group(2))
+                    start_month = (q - 1) * 3 + 1
+                    return date(year, start_month, 1)
+
+                # 2) 老格式: "2024-1" / "2024-4" 之类，把后面的数当月份
+                m = re.match(r'^(\d{4})-(\d{1,2})$', s)
+                if m:
+                    year = int(m.group(1))
+                    month = int(m.group(2))
+                    q = (month - 1) // 3 + 1          # 所属季度
+                    start_month = (q - 1) * 3 + 1    # 季度起始月
+                    return date(year, start_month, 1)
+
+                # 3) 完整日期: "2024-01-01" 之类
+                try:
+                    dt = datetime.strptime(s, '%Y-%m-%d').date()
+                    month = dt.month
+                    q = (month - 1) // 3 + 1
+                    start_month = (q - 1) * 3 + 1
+                    return date(dt.year, start_month, 1)
+                except ValueError:
+                    pass
+
+                raise ValueError(f'不支持的季度时间格式: {tp}')
+
+            # 其他粒度兜底
+            else:
+                for fmt in ('%Y-%m-%d', '%Y-%m'):
+                    try:
+                        return datetime.strptime(s, fmt).date()
+                    except ValueError:
+                        continue
+                raise ValueError(f'不支持的时间格式: {tp}')
+
+        # time_point -> forecast_date
+        point_date_map = {tp: tp_to_date(tp) for tp in time_points}
+        date_list = list(point_date_map.values())
+
+        # 选择对应的 ForecastXXX 模型
+        if gran == 'monthly':
+            ModelCls = ForecastMonthly
+        elif gran == 'quarterly':
+            ModelCls = ForecastQuarterly
+        elif gran == 'yearly':
+            ModelCls = ForecastYearly
+        else:
+            return item
+
+        qs = ModelCls.objects.filter(
+            origin=origin,
+            destination=dest,
+            forecast_date__in=date_list,
+        ).values('forecast_date', 'ask')
+
+        ask_map = {row['forecast_date']: row['ask'] for row in qs}
+
+        # exit_predictions：与 future_predictions 一一对应
+        exit_predictions = []
+        for r in future_list:
+            tp = r.get('time_point')
+            if not tp:
+                continue
+            fd = point_date_map.get(tp)
+            ask_val = ask_map.get(fd)  # 查不到就是 None
+            exit_predictions.append({
+                'time_point': tp,
+                'value': ask_val,
+            })
+
+        pr['exit_predictions'] = exit_predictions
+        item['prediction_results'] = pr
+        return item
+
+    except Exception:
+        # 不让它影响主流程，有需要你可以改成 logging
+        return item
+
 
 # 获取预测模型函数
 @api_view(['GET'])
@@ -284,6 +444,7 @@ def forecast_route_view(request):
                                {"time_point": "2024-02", "value": 1400},
                                {"time_point": "2024-03", "value": 1450}
                            ]
+                           "exit_predictions"：
                        }
                    }
                }
@@ -333,7 +494,8 @@ def forecast_route_view(request):
                         raise ValueError('prediction_periods 必须是正整数')
 
                     result = predict_single_route(pred)
-
+                    result = attach_existing_ask_predictions(result)
+                    print(result)
                     results.append({
                         'task_index': i,
                         'hierarchy_reconcile': 0,
@@ -462,7 +624,8 @@ def forecast_route_view(request):
                                 'future_predictions': yearly_futu
                             }
                         }
-
+                    selected_item = attach_existing_ask_predictions(selected_item)
+                    print(selected_item)
                     # 添加到最终统一结果中
                     results.append({
                         'task_index': i,
@@ -1737,3 +1900,421 @@ def trigger_update_forecast(request):
                 'note': '在此期间，系统将展示上一次成功的预测数据。'
             }
         })
+
+
+
+@api_view(['POST'])
+@csrf_exempt
+def update_forecast_ask_view(request):
+    """
+    批量更新（或创建）预测表中的 ask 值。
+
+    请求体：
+    {
+        "time_granularity": "monthly" | "quarterly" | "yearly",
+        "results": [
+            {
+                "origin": "CAN",
+                "destination": "PEK",
+                "forecast_date": "2024-01-01",  // 一定是 YYYY-MM-DD
+                "ask": 12345.6
+            },
+            ...
+        ]
+    }
+    """
+    # 1. 解析 JSON
+    try:
+        body = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "error": "无效的 JSON 格式"},
+            status=400,
+        )
+
+    gran = body.get("time_granularity")
+    results = body.get("results") or []
+
+    # 2. 校验粒度
+    if gran not in ("monthly", "quarterly", "yearly"):
+        return JsonResponse(
+            {"success": False, "error": "time_granularity 必须为 monthly/quarterly/yearly"},
+            status=400,
+        )
+
+    # 3. 校验结果列表
+    if not isinstance(results, list) or not results:
+        return JsonResponse(
+            {"success": False, "error": "results 必须是非空数组"},
+            status=400,
+        )
+
+    # 4. 选择对应的模型
+    model_map = {
+        "monthly": ForecastMonthly,
+        "quarterly": ForecastQuarterly,
+        "yearly": ForecastYearly,
+    }
+    ModelCls = model_map[gran]
+
+    parsed_items = []
+    errors = []
+
+    # 5. 逐条解析 & 基础校验
+    for idx, row in enumerate(results):
+        try:
+            origin = row.get("origin")
+            destination = row.get("destination")
+            fd_str = row.get("forecast_date")
+            ask_val = row.get("ask")
+
+            if not origin or not destination:
+                raise ValueError("origin/destination 不能为空")
+            if not fd_str:
+                raise ValueError("forecast_date 不能为空")
+            if ask_val is None:
+                raise ValueError("ask 不能为空")
+
+            # 前端保证是 "YYYY-MM-DD"
+            try:
+                forecast_date = datetime.strptime(fd_str, "%Y-%m-%d").date()
+            except ValueError:
+                raise ValueError(f"forecast_date 格式必须为 YYYY-MM-DD，当前为: {fd_str}")
+
+            ask_float = float(ask_val)
+
+            parsed_items.append(
+                (origin, destination, forecast_date, ask_float)
+            )
+        except Exception as e:
+            errors.append(
+                {
+                    "index": idx,
+                    "row": row,
+                    "error": str(e),
+                }
+            )
+
+    if not parsed_items:
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "没有可用的更新项",
+                "detail_errors": errors,
+            },
+            status=400,
+        )
+
+    # 6. 批量 update_or_create
+    updated = 0
+    created = 0
+    with transaction.atomic():
+        for origin, dest, fdate, ask_val in parsed_items:
+            obj, is_created = ModelCls.objects.update_or_create(
+                origin=origin,
+                destination=dest,
+                forecast_date=fdate,
+                defaults={"ask": ask_val},
+            )
+            if is_created:
+                created += 1
+            else:
+                updated += 1
+
+    # 7. 返回结果
+    return JsonResponse(
+        {
+            "success": True,
+            "data": {
+                "time_granularity": gran,
+                "updated": updated,
+                "created": created,
+                "errors": errors,  # 哪些行失败了会放这里
+            },
+        }
+    )
+
+import csv
+import os
+from django.conf import settings
+
+ROUTE_RANKING_CSV = os.path.join(
+    settings.BASE_DIR, "backend", "Predict_Datas", "route_ranking.csv"
+)
+
+
+def get_routes_from_csv(panel_type: str):
+    """
+    从 route_ranking.csv 里按行号取对应类型的航线列表。
+
+    约定：
+      - 文件已经按你需要的规则排好序
+      - large:   第 1  ~ 100 行
+      - medium:  第 101 ~ 500 行
+      - small:   先不处理，返回 []
+
+    csv 头里假定有字段：
+      - origin
+      - destination
+    """
+    routes = []
+
+    if not os.path.exists(ROUTE_RANKING_CSV):
+        return routes
+
+    with open(ROUTE_RANKING_CSV, newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+
+        # 行号从 1 开始数（更直观一点）
+        for idx, row in enumerate(reader, start=1):
+            origin = row.get("origin")
+            dest = row.get("destination")
+
+            # 跳过字段缺失的行
+            if not origin or not dest:
+                continue
+
+            if panel_type == "large":
+                if 1 <= idx <= 100:
+                    routes.append((origin, dest))
+                elif idx > 100:
+                    # large 只要前 100 行，后面的可以直接 break
+                    break
+
+            elif panel_type == "medium":
+                if 101 <= idx <= 500:
+                    routes.append((origin, dest))
+                elif idx > 500:
+                    # medium 只要到 500 行
+                    break
+
+            elif panel_type == "small":
+                # 小运力后面再处理，这里先不返回任何航线
+                pass
+
+    return routes
+
+
+from datetime import date
+
+def build_periods(time_granularity: str, start_year: int, years: int):
+    """
+    根据粒度 & 开始年份 & 年数，生成：
+      - forecast_dates: 用于查表的 Date 列表
+      - labels: 前端展示用的字符串列表
+
+    约定：
+      years 参数表示“多少年”的跨度：
+        yearly:    一年一个点，总数 = years
+        quarterly: 一年四个季度，总数 = years * 4
+        monthly:   一年十二个月，总数 = years * 12
+    """
+    forecast_dates = []
+    labels = []
+
+    if years <= 0:
+        return forecast_dates, labels
+
+    if time_granularity == "yearly":
+        for y in range(start_year, start_year + years):
+            d = date(y, 1, 1)
+            forecast_dates.append(d)
+            labels.append(str(y))
+
+    elif time_granularity == "quarterly":
+        for y in range(start_year, start_year + years):
+            for q in range(1, 5):  # Q1~Q4
+                month = (q - 1) * 3 + 1
+                d = date(y, month, 1)
+                forecast_dates.append(d)
+                labels.append(f"{y}-Q{q}")
+
+    elif time_granularity == "monthly":
+        for y in range(start_year, start_year + years):
+            for m in range(1, 13):  # 1~12 月
+                d = date(y, m, 1)
+                forecast_dates.append(d)
+                labels.append(f"{y}-{m:02d}")
+
+    else:
+        raise ValueError("不支持的时间粒度")
+
+    return forecast_dates, labels
+from django.db.models import Q
+@api_view(['GET'])
+def forecast_panels_view(request):
+    """
+    GET /api/forecast-panels/?time_granularity=monthly&start_year=2024&steps=12&panels=large,medium
+
+    参数：
+      - time_granularity: monthly | quarterly | yearly
+      - start_year: 开始年份 (int)
+      - steps: 时间步数 (int)
+      - panels: 需要返回的面板类型
+          * 支持 ?panels=large,medium
+          * 也支持 ?panels=large&panels=medium
+
+    返回：
+    {
+      "success": true,
+      "data": {
+        "forecast_time": "2024-08-01T10:20:30",
+        "time_points": ["2024-01", "2024-02", ...],
+        "panels": {
+          "large": {
+            "headers": ["route", "2024-01", "2024-02", ...],
+            "rows": [
+              ["SHA-PEK", 1200, 1300, ...],
+              ["PVG-CAN", 900, 920, ...]
+            ]
+          },
+          "medium": {
+            "headers": [...],
+            "rows": [...]
+          },
+          "small": { ... }
+        }
+      }
+    }
+    """
+    try:
+        gran = request.GET.get("time_granularity", "monthly")
+        if gran not in ("monthly", "quarterly", "yearly"):
+            return JsonResponse(
+                {"success": False, "error": "time_granularity 必须为 monthly/quarterly/yearly"},
+                status=400,
+            )
+
+        try:
+            start_year = int(request.GET.get("start_year", "2024"))
+        except ValueError:
+            return JsonResponse(
+                {"success": False, "error": "start_year 必须是整数年份"},
+                status=400,
+            )
+
+        try:
+            steps = int(request.GET.get("steps", "12"))
+        except ValueError:
+            return JsonResponse(
+                {"success": False, "error": "steps 必须是整数"},
+                status=400,
+            )
+
+        # 解析 panels 参数
+        panel_types = request.GET.getlist("panels")
+        if not panel_types:
+            raw = request.GET.get("panels", "")
+            if raw:
+                panel_types = [p.strip() for p in raw.split(",") if p.strip()]
+        if not panel_types:
+            # 默认只返回 large
+            panel_types = ["large"]
+
+        # 生成时间轴
+        forecast_dates, time_labels = build_periods(gran, start_year, steps)
+
+        # 选择对应模型
+        model_map = {
+            "monthly": ForecastMonthly,
+            "quarterly": ForecastQuarterly,
+            "yearly": ForecastYearly,
+        }
+        ModelCls = model_map[gran]
+
+        # 先根据需要的 panels 从 csv 拿到所有航线
+        panel_routes = {}
+        all_routes = set()
+        for p in panel_types:
+            if p == "small":
+                # 小运力：直接用数据库中的汇总航线 other-other
+                routes = [("other", "other")]
+            else:
+                # large / medium 还是按 csv 来
+                routes = get_routes_from_csv(p)
+
+            panel_routes[p] = routes
+            all_routes.update(routes)
+
+        # 如果一个航线都没有，就直接返回空结构
+        if not all_routes:
+            return JsonResponse(
+                {
+                    "success": True,
+                    "data": {
+                        "forecast_time": None,
+                        "time_points": time_labels,
+                        "panels": {p: {"headers": ["route"] + time_labels, "rows": []} for p in panel_types},
+                    },
+                }
+            )
+
+        # 用 OR 构造 (origin, destination) 条件
+        route_filter = Q()
+        for o, d in all_routes:
+            route_filter |= Q(origin=o, destination=d)
+
+        # 批量查询这些航线在指定 forecast_dates 的 ask
+        qs = (
+            ModelCls.objects.filter(route_filter, forecast_date__in=forecast_dates)
+            .values("origin", "destination", "forecast_date", "ask")
+        )
+
+        # 构造一个 map: (origin, destination, forecast_date) -> ask
+        ask_map = {}
+        for row in qs:
+            key = (row["origin"], row["destination"], row["forecast_date"])
+            ask_map[key] = row["ask"]
+
+        # 获取最新一次成功的预测时间（用 created_at）
+        last_log = ForecastUpdateLog.objects.filter(status=2).order_by("-created_at").first()
+        if last_log:
+            forecast_time_str = last_log.created_at.isoformat()
+        else:
+            forecast_time_str = None
+
+        # 组装返回的 panels 结构
+        panels_data = {}
+        for p in panel_types:
+            routes = panel_routes.get(p, [])
+            headers = ["route"] + time_labels
+            rows = []
+
+            for o, d in routes:
+                route_name = f"{o}-{d}"
+                values = []
+                for fdate in forecast_dates:
+                    key = (o, d, fdate)
+                    val = ask_map.get(key, 0)  # 没有的为 0
+                    values.append(val)
+                rows.append([route_name] + values)
+
+            panels_data[p] = {
+                "headers": headers,
+                "rows": rows,
+            }
+
+        return JsonResponse(
+            {
+                "success": True,
+                "data": {
+                    "forecast_time": forecast_time_str,
+                    "time_points": time_labels,
+                    "panels": panels_data,
+                },
+            }
+        )
+
+    except Exception as e:
+        # 出异常时返回 500，方便调试
+        import traceback
+
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "服务器内部错误",
+                "message": str(e),
+                "traceback": traceback.format_exc(),
+            },
+            status=500,
+        )

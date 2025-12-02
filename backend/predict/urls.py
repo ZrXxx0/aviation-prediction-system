@@ -30,4 +30,6 @@ urlpatterns = [
     path('data/upload/insert/', views.upload_insert, name='upload_insert'),
     path('data/upload/resolve/', views.upload_resolve, name='upload_resolve'),
     path('forecast/update_topn/', views.trigger_update_forecast, name='update_topn'),
+    path("forecast/update_ask/", views.update_forecast_ask_view, name="update_forecast_ask"),
+    path("forecast/show/", views.forecast_panels_view, name="forecast_panels"),
 ]
