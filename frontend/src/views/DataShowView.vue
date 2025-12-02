@@ -122,7 +122,7 @@
             <div class="card-header">操作</div>
           </template>
           <div class="side-actions">
-            <el-button class="side-action-btn" size="small" type="warning" @click="HistoryDialog" :disabled="!hasData">数据更新</el-button>
+            <el-button class="side-action-btn" size="small" type="warning" @click="HistoryDialog">数据更新</el-button>
             <el-button class="side-action-btn" size="small" type="primary" @click="exportData" :disabled="!hasData">数据导出</el-button>
           </div>
         </el-card>
@@ -159,39 +159,30 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import * as echarts from 'echarts'
-import axios from 'axios' // 保留：切换到后端时可以使用
-import apiConfig from '@/config/api.js' // 保留：示例（未必立即使用）
+import axios from 'axios'
+import apiConfig from '@/config/api.js'
 import { ElMessage } from 'element-plus'
 import * as XLSX from 'xlsx'
 
+/* ------------------ update dialog ------------------ */
 const updateDialogVisible = ref(false)
-const updateLogs = ref([])          // 表格数据
-const canUpdate = ref(false)        // 是否允许点击按钮
-
-// 打开弹窗时触发
+const updateLogs = ref([])
+const canUpdate = ref(false)
 const HistoryDialog = () => {
   updateDialogVisible.value = true
   loadUpdateStatus()
 }
-
-// 调接口获取数据
 const loadUpdateStatus = async () => {
   try {
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.LOGS)
     const res = await axios.get(url)
-
-    console.log('更新记录返回数据：', res.data)
     if (res.data?.success) {
       const data = res.data.data
       updateLogs.value = data.logs || []
       canUpdate.value = data.can_update
     }
-  } catch (err) {
-    console.error('加载更新记录失败:', err)
-  }
+  } catch (err) { console.error('加载更新记录失败:', err) }
 }
-
-// 点击更新按钮事件
 const doUpdate = async () => {
   if (!canUpdate.value) return
   try {
@@ -206,10 +197,11 @@ const doUpdate = async () => {
   }
 }
 
+/* ------------------ main state ------------------ */
 const granularity = ref('年度')
 const years = ref(10)
 const selectedClasses = ref(['large'])
-const viewMode = ref('table') // 默认表格
+const viewMode = ref('table')
 const loading = ref(false)
 
 const chartRef = ref(null)
@@ -217,7 +209,6 @@ const tableWrapRef = ref(null)
 let chartInstance = null
 let ro = null
 
-// 存储解析后的数据
 const dataStore = reactive({ large: null, medium: null, small: null, _prepared: [] })
 const labels = ref([])
 
@@ -231,11 +222,7 @@ const periods = computed(() => {
 const hasData = computed(() => (Array.isArray(dataStore._prepared) && dataStore._prepared.length > 0))
 const preparedCount = computed(() => (Array.isArray(dataStore._prepared) ? dataStore._prepared.length : 0))
 
-/**
- * loadForecast
- * - 内部使用静态数据模拟后端返回（写在此函数内）
- * - 同时保留了被注释的真实请求示例，切换到真实后端时取消注释并调整 apiConfig
- */
+/* ------------------ fetch / parse / prepare ------------------ */
 async function loadForecast() {
   if (!selectedClasses.value.length) {
     ElMessage.warning('请选择至少一种统计对象（大/中/小）')
@@ -243,29 +230,20 @@ async function loadForecast() {
   }
   loading.value = true
   try {
-    // 构造请求参数（GET 请求使用 query 参数）
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.SHOW)
     const res = await axios.get(url, {
-      params : {
-      panels: selectedClasses.value.join(','), // 逗号分隔
-      time_granularity: granularity.value === '年度' ? 'yearly' : granularity.value === '季度' ? 'quarterly' : 'monthly',
-      steps: periods.value
-    },
+      params: {
+        panels: selectedClasses.value.join(','),
+        time_granularity: granularity.value === '年度' ? 'yearly' : granularity.value === '季度' ? 'quarterly' : 'monthly',
+        steps: periods.value
+      },
       timeout: 60000
     })
-    if (!res.data || !res.data.data) {
-      throw new Error('后端返回数据格式错误')
-    }
-    console.log('后端返回数据：', res.data.data)
-
-    // 后端返回示例：{ create_date: '2025-12-02', data: { large: {...}, medium: {...}, small: {...} } }
+    if (!res.data || !res.data.data) throw new Error('后端返回数据格式错误')
     parseBackend(res.data.data)
-
     prepareVisualData()
-
     if (viewMode.value !== 'table') renderChart()
     nextTick(() => chartInstance?.resize())
-
     ElMessage.success(`数据加载成功，更新时间：${res.data.create_date || '未知'}`)
   } catch (err) {
     console.error(err)
@@ -275,12 +253,9 @@ async function loadForecast() {
   }
 }
 
-// 解析后端（兼容 panels / series）
-// 添加更严格的类型判断以避免 labels 被设置成非数组（导致 template 中 .map 报错）
 function parseBackend(resp) {
   dataStore.large = dataStore.medium = dataStore.small = null
   labels.value = []
-
   if (!resp) return
 
   if (Array.isArray(resp.series) && resp.series.length) {
@@ -355,6 +330,7 @@ function prepareVisualData() {
   dataStore._prepared = Array.isArray(combined) ? combined : []
 }
 
+/* ------------------ chart / view rendering ------------------ */
 function renderChart() {
   if (!chartRef.value) return
   if (!chartInstance) chartInstance = echarts.init(chartRef.value)
@@ -397,7 +373,7 @@ function renderChart() {
   }
 }
 
-// helpers
+/* ------------------ helpers / gen labels / export ------------------ */
 function genLabels() {
   const cnt = periods.value
   const out = []
@@ -452,8 +428,7 @@ function exportData() {
   }
 }
 
-// 表格列与行（用于表格视图）
-// 增加类型守护，避免 labels 被误设置成非数组导致 .map 报错
+/* ------------------ table computed ------------------ */
 const tableColumns = computed(() => {
   if (!Array.isArray(labels.value)) return []
   return labels.value.map(l => ({ key: l, label: l }))
@@ -469,11 +444,9 @@ const panelRows = computed(() => {
   })
 })
 
-// 表格/图表 最小宽度：根据列数动态计算，保证足够宽度以触发横向滚动
 const tableMinWidth = computed(() => {
   const cols = Array.isArray(labels.value) ? labels.value.length : 0
-  // 基础宽度 + 每列宽度
-  const base = 200 // route + padding
+  const base = 200
   const per = 100
   const w = Math.max(800, base + cols * per)
   return w + 'px'
@@ -485,7 +458,6 @@ const chartMinWidth = computed(() => {
   return w + 'px'
 })
 
-// summary table
 const summaryTable = computed(() => {
   const rows = []
   const classes = { large: '大运量', medium: '中运量', small: '小运量(加总)' }
@@ -513,7 +485,7 @@ const summaryTable = computed(() => {
 function fmtNumber(_, __, v) { return (v === null || v === undefined) ? '-' : Number(v).toLocaleString() }
 function fmtPct(_, __, v) { return (v === null || v === undefined) ? '-' : (v*100).toFixed(2) + '%' }
 
-// DRAG-TO-SCROLL 支持：返回 cleanup 函数
+/* ------------------ drag-to-scroll (safe) ------------------ */
 function enableDragScroll(el) {
   if (!el) return () => {}
   let isDown = false
@@ -523,7 +495,6 @@ function enableDragScroll(el) {
   let scrollTop = 0
 
   const onMouseDown = (e) => {
-    // only left button
     if (e.button !== undefined && e.button !== 0) return
     isDown = true
     el.classList.add('dragging')
@@ -575,43 +546,44 @@ function enableDragScroll(el) {
     el.classList.remove('dragging')
   }
 
-  // Wheel with shift to scroll horizontally (default behavior exists) - keep native
-  el.addEventListener('mousedown', onMouseDown, { passive: true })
+  // use passive:false for mousedown so preventDefault can be used if needed later
+  el.addEventListener('mousedown', onMouseDown, { passive: false })
   window.addEventListener('mousemove', onMouseMove, { passive: true })
   window.addEventListener('mouseup', onMouseUp, { passive: true })
   el.addEventListener('touchstart', onTouchStart, { passive: false })
   el.addEventListener('touchmove', onTouchMove, { passive: false })
   el.addEventListener('touchend', onTouchEnd, { passive: true })
-  // return cleanup
+
   return () => {
-    el.removeEventListener('mousedown', onMouseDown)
-    window.removeEventListener('mousemove', onMouseMove)
-    window.removeEventListener('mouseup', onMouseUp)
-    el.removeEventListener('touchstart', onTouchStart)
-    el.removeEventListener('touchmove', onTouchMove)
-    el.removeEventListener('touchend', onTouchEnd)
+    try {
+      el.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+      el.removeEventListener('touchstart', onTouchStart)
+      el.removeEventListener('touchmove', onTouchMove)
+      el.removeEventListener('touchend', onTouchEnd)
+    } catch (e) { /* ignore */ }
   }
 }
 
 let dragCleanups = []
 
+/* ------------------ IMPORTANT: keep onWinResize in module scope so we can remove it on unmount ------------------ */
+let onWinResize = null
+
 onMounted(() => {
-  // 图表初始化占位
+  // 初始化图表占位
   setTimeout(() => {
     if (chartRef.value) {
       chartInstance = echarts.init(chartRef.value)
-      // 先显示加载中（也可以不显示）
-      chartInstance.setOption({ 
-        graphic: [{ 
-          type:'text', left:'center', top:'center', 
-          style:{ text:'加载中...', fontSize:14, fill:'#909399' }
-        }] 
+      chartInstance.setOption({
+        graphic: [{ type:'text', left:'center', top:'center', style:{ text:'加载中...', fontSize:14, fill:'#909399' } }]
       })
     }
   }, 50)
 
-  // 先定义 resize 事件处理函数，方便 later remove
-  const onWinResize = () => chartInstance?.resize()
+  // 将 onWinResize 赋值到外层变量，确保 removeEventListener 时引用一致
+  onWinResize = () => chartInstance?.resize()
   window.addEventListener('resize', onWinResize)
 
   if (typeof ResizeObserver !== 'undefined') {
@@ -621,7 +593,7 @@ onMounted(() => {
     })
   }
 
-  // 设置拖动滚动监听（如果元素存在）
+  // 设置拖动滚动监听（安全绑定并收集 cleanup）
   nextTick(() => {
     if (tableWrapRef.value) {
       dragCleanups.push(enableDragScroll(tableWrapRef.value))
@@ -631,28 +603,33 @@ onMounted(() => {
     }
   })
 
-  // **关键点：进入页面时默认加载数据**
+  // 页面进入时自动加载数据
   loadForecast()
 })
 
 onBeforeUnmount(() => {
-  // 移除之前绑定的resize监听，确保引用一致
-  window.removeEventListener('resize', onWinResize)
+  // 先移除 resize 监听（确保 onWinResize 在模块作用域）
+  try {
+    if (onWinResize) window.removeEventListener('resize', onWinResize)
+  } catch (e) { console.warn('remove resize failed', e) }
 
-  if (ro) { 
-    try { ro.disconnect() } catch (e) {} 
-    ro = null 
-  }
-  chartInstance?.dispose()
-  chartInstance = null
+  // 断开 ResizeObserver
+  try { if (ro) { ro.disconnect(); ro = null } } catch (e) { /* ignore */ }
 
-  dragCleanups.forEach(fn => { try { fn() } catch (e) {} })
-  dragCleanups = []
+  // 销毁图表实例
+  try { chartInstance?.dispose(); chartInstance = null } catch (e) { /* ignore */ }
+
+  // 调用并清理拖拽 cleanup
+  try {
+    dragCleanups.forEach(fn => { try { fn() } catch (e) {} })
+    dragCleanups = []
+  } catch (e) { /* ignore */ }
 })
 
-// 视图切换时调整拖拽监听与重绘
+/* ------------------ watch ------------------ */
 watch(viewMode, (v) => {
   nextTick(() => {
+    // 清理旧的 drag handlers
     dragCleanups.forEach(fn => { try { fn() } catch (e) {} })
     dragCleanups = []
     if (v === 'table') {
