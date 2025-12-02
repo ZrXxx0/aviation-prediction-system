@@ -141,7 +141,7 @@ import * as XLSX from 'xlsx'
 
 const granularity = ref('年度')
 const years = ref(10)
-const selectedClasses = ref(['large', 'medium', 'small'])
+const selectedClasses = ref(['large'])
 const viewMode = ref('table') // 默认表格
 const loading = ref(false)
 
@@ -176,63 +176,32 @@ async function loadForecast() {
   }
   loading.value = true
   try {
-    // ======= 真实后端请求示例（注释） =======
-    // const url = apiConfig.getUrl(apiConfig.endpoints?.PREDICT?.CAPACITY_FORECAST)
-    // const payload = {
-    //   classes: selectedClasses.value,
-    //   granularity: granularity.value === '年度' ? 'yearly' : granularity.value === '季度' ? 'quarterly' : 'monthly',
-    //   periods: periods.value
-    // }
-    // const res = await axios.post(url, payload, { timeout: 60000 })
-    // const resp = res.data && (res.data.data || res.data)
-    // parseBackend(resp)
-    // =========================================
+    // 构造请求参数（GET 请求使用 query 参数）
+    const params = {
+      classes: selectedClasses.value.join(','), // 逗号分隔
+      granularity: granularity.value === '年度' ? 'yearly' : granularity.value === '季度' ? 'quarterly' : 'monthly',
+      periods: periods.value
+    }
 
-    // ======= 本地静态 mock（用于前端调试） =======
-    const mock = (() => {
-      const y = new Date().getFullYear()
-      const months = []
-      for (let m = 1; m <= 12; m++) months.push(`${y}-${String(m).padStart(2, '0')}`)
-      return {
-        panels: {
-          large: {
-            headers: ['route', ...months],
-            rows: [
-              ['SHA-PEK', 1200,1300,1250,1400,1500,1600,1550,1620,1580,1700,1680,1750],
-              ['PVG-CAN', 900,920,880,950,1000,1020,1010,1050,1030,1100,1080,1120]
-            ]
-          },
-          medium: {
-            headers: ['route', ...months],
-            rows: [
-              ['SHA-CTU', 420,430,410,450,480,500,495,510,505,520,515,530],
-              ['PEK-KMG', 360,370,350,380,400,410,405,420,415,430,425,440]
-            ]
-          },
-          small: {
-            headers: ['route', ...months],
-            rows: [
-              ['小运力（加总）', 2400,2500,2450,2600,2700,2800,2755,2870,2820,2950,2900,3020]
-            ]
-          }
-        }
-      }
-    })()
+    // 假设接口地址是 /api/panel-data，请根据实际替换
+    const res = await axios.get('/api/panel-data', { params, timeout: 60000 })
 
-    // parse mock panels (直接把 mock 放在调用处，满足“点击加载后使用内部静态数据”的要求)
-    parseBackend({
-      large: mock.panels.large,
-      medium: mock.panels.medium,
-      small: mock.panels.small
-    })
+    if (!res.data || !res.data.data) {
+      throw new Error('后端返回数据格式错误')
+    }
+
+    // 后端返回示例：{ create_date: '2025-12-02', data: { large: {...}, medium: {...}, small: {...} } }
+    parseBackend(res.data.data)
+
     prepareVisualData()
-    // 根据选择视图渲染图或展示表格
+
     if (viewMode.value !== 'table') renderChart()
     nextTick(() => chartInstance?.resize())
-    ElMessage.success('预测数据加载成功')
+
+    ElMessage.success(`数据加载成功，更新时间：${res.data.create_date || '未知'}`)
   } catch (err) {
     console.error(err)
-    ElMessage.error('加载失败')
+    ElMessage.error('加载失败，请检查网络或后台接口')
   } finally {
     loading.value = false
   }
@@ -563,10 +532,17 @@ onMounted(() => {
   setTimeout(() => {
     if (chartRef.value) {
       chartInstance = echarts.init(chartRef.value)
-      chartInstance.setOption({ graphic: [{ type:'text', left:'center', top:'center', style:{ text:'请点击“加载”获取示例数据（前端模拟）', fontSize:14, fill:'#909399' }}] })
+      // 先显示加载中（也可以不显示）
+      chartInstance.setOption({ 
+        graphic: [{ 
+          type:'text', left:'center', top:'center', 
+          style:{ text:'加载中...', fontSize:14, fill:'#909399' }
+        }] 
+      })
     }
   }, 50)
 
+  // 先定义 resize 事件处理函数，方便 later remove
   const onWinResize = () => chartInstance?.resize()
   window.addEventListener('resize', onWinResize)
 
@@ -583,27 +559,32 @@ onMounted(() => {
       dragCleanups.push(enableDragScroll(tableWrapRef.value))
     }
     if (chartRef.value) {
-      // chartRef is the chart container element (div) that can overflow; make it draggable
       dragCleanups.push(enableDragScroll(chartRef.value))
     }
   })
+
+  // **关键点：进入页面时默认加载数据**
+  loadForecast()
 })
 
 onBeforeUnmount(() => {
-  try { window.removeEventListener('resize', () => chartInstance?.resize()) } catch (e) { /* ignore */ }
-  if (ro) { try { ro.disconnect() } catch (e) { } ro = null }
+  // 移除之前绑定的resize监听，确保引用一致
+  window.removeEventListener('resize', onWinResize)
+
+  if (ro) { 
+    try { ro.disconnect() } catch (e) {} 
+    ro = null 
+  }
   chartInstance?.dispose()
   chartInstance = null
-  // cleanup drag handlers
+
   dragCleanups.forEach(fn => { try { fn() } catch (e) {} })
   dragCleanups = []
 })
 
-// 当视图切换到图表模式并有数据时重绘图表
+// 视图切换时调整拖拽监听与重绘
 watch(viewMode, (v) => {
   nextTick(() => {
-    // ensure drag handlers are attached to the correct visible element
-    // clear previous drag handlers, then reattach for visible containers
     dragCleanups.forEach(fn => { try { fn() } catch (e) {} })
     dragCleanups = []
     if (v === 'table') {

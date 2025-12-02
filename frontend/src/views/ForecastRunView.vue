@@ -92,8 +92,16 @@
 
         <!-- 右侧图表和结果 -->
         <div class="result-area">
-          <div class="chart-header">
+          <div class="chart-header" style="display: flex; align-items: center; justify-content: space-between; padding-right: 10px;">
             <el-checkbox v-model="showTrain">显示历史数据</el-checkbox>
+            <el-button 
+              type="primary" 
+              size="small" 
+              :disabled="!forecastResults.length || showProcessing" 
+              @click="updateForecastResult"
+            >
+              更新预测结果
+            </el-button>
           </div>
           <div class="chart-area" ref="chartRef"></div>
 
@@ -600,34 +608,79 @@ function renderFromResults() {
     const { model_info, prediction_results } = item.data || {}
     const { origin_airport, destination_airport, model_type, train_mae, train_rmse, train_mape, train_r2 } = model_info || {}
     if (!prediction_results) return
+
     const hist = (prediction_results.historical_data || []).map(d => ({ ...d, type: 'train' }))
     const pred = (prediction_results.future_predictions || []).map(d => ({ ...d, type: 'predict' }))
-    const allData = [...hist, ...pred]
+    const existed = (prediction_results.existed_data || []).map(d => ({ ...d, type: 'existed' }))
+    const allData = [...hist, ...pred, ...existed]
 
-    const labels = allData.map(d => d.time_point)
-    xLabels = showTrain.value ? labels : pred.map(d => d.time_point)
+    // xLabels 按需设定，保证覆盖所有时间点
+    const histTimes = hist.map(d => d.time_point)
+    const predTimes = pred.map(d => d.time_point)
+    const existedTimes = existed.map(d => d.time_point)
+
+    // 取联合时间轴（去重并排序）
+    xLabels = Array.from(new Set([...histTimes, ...predTimes, ...existedTimes])).sort()
 
     if (showTrain.value) {
+      // 1. 历史+预测，历史实线，预测虚线
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type})`,
+        name: `${origin_airport}→${destination_airport} (${model_type}) - Predict`,
         type: 'line',
         smooth: true,
-        data: [...hist.map(d => d.value), ...Array(pred.length).fill(null)],
+        data: xLabels.map(time => {
+          const found = hist.find(d => d.time_point === time)
+          return found ? found.value : null
+        }),
         lineStyle: { type: 'solid' }
       })
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type})`,
+        name: `${origin_airport}→${destination_airport} (${model_type}) - Predict`,
         type: 'line',
         smooth: true,
-        data: [...Array(hist.length).fill(null), ...pred.map(d => d.value)],
+        data: xLabels.map(time => {
+          const found = pred.find(d => d.time_point === time)
+          return found ? found.value : null
+        }),
+        lineStyle: { type: 'dashed' }
+      })
+
+      // 2. 历史+已存在，历史实线，已存在虚线
+      allSeries.push({
+        name: `${origin_airport}→${destination_airport} (${model_type}) - Existed`,
+        type: 'line',
+        smooth: true,
+        data: xLabels.map(time => {
+          const found = hist.find(d => d.time_point === time)
+          return found ? found.value : null
+        }),
+        lineStyle: { type: 'solid' },
+        lineStyle: { type: 'solid', opacity: 0.5 } // 可以稍微调淡一点区分两组历史线
+      })
+      allSeries.push({
+        name: `${origin_airport}→${destination_airport} (${model_type}) - Existed`,
+        type: 'line',
+        smooth: true,
+        data: xLabels.map(time => {
+          const found = existed.find(d => d.time_point === time)
+          return found ? found.value : null
+        }),
         lineStyle: { type: 'dashed' }
       })
     } else {
+      // 不显示历史，只画预测和已存在虚线
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type})`,
+        name: `${origin_airport}→${destination_airport} (${model_type}) - Predict`,
         type: 'line',
         smooth: true,
         data: pred.map(d => d.value),
+        lineStyle: { type: 'solid' }
+      })
+      allSeries.push({
+        name: `${origin_airport}→${destination_airport} (${model_type}) - Existed`,
+        type: 'line',
+        smooth: true,
+        data: existed.map(d => d.value),
         lineStyle: { type: 'solid' }
       })
     }
@@ -644,6 +697,37 @@ function renderFromResults() {
 
   renderChart(xLabels, allSeries)
   performanceTable.value = performance
+}
+
+async function updateForecastResult() {
+  if (!forecastResults.value.length) {
+    ElMessage.warning('暂无预测结果，无法更新')
+    return
+  }
+
+  try {
+    showProcessing.value = true
+    console.log('更新预测结果的请求体:', {
+      time_granularity: timeRange.value,
+      results: forecastResults.value
+    })
+  //   const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE_FORECAST) // 你需要确认后端对应的接口地址
+  //   const res = await axios.post(url, {
+  //     forecastResults: forecastResults.value
+  //   })
+
+  //   if (res.data.success) {
+  //     ElMessage.success('预测结果更新成功')
+  //   } else {
+  //     ElMessage.error('更新预测结果失败')
+  //     console.error('更新失败：', res.data)
+  //   }
+  } catch (error) {
+    ElMessage.error('请求更新失败')
+    console.error(error)
+  } finally {
+    showProcessing.value = false
+  }
 }
 
 watch(showTrain, async () => {
