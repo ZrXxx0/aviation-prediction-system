@@ -2270,6 +2270,7 @@ def forecast_panels_view(request):
     返回：
     {
       "success": true,
+      "route_length":,
       "data": {
         "forecast_time": "2024-08-01T10:20:30",
         "time_points": ["2024-01", "2024-02", ...],
@@ -2323,7 +2324,6 @@ def forecast_panels_view(request):
             )
 
         if not panel_types:
-            # 再兜底一下单个 panels 的情况（比如有人只用 get）
             raw = request.GET.get("panels", "")
             if raw:
                 panel_types = [p.strip() for p in raw.split(",") if p.strip()]
@@ -2369,6 +2369,12 @@ def forecast_panels_view(request):
                     },
                 }
             )
+        # 获取 route_ranking.csv 的总行数
+        route_length = 0
+        if os.path.exists(ROUTE_RANKING_CSV):
+            with open(ROUTE_RANKING_CSV, newline="", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                route_length = sum(1 for row in reader)
 
         # 用 OR 构造 (origin, destination) 条件
         route_filter = Q()
@@ -2385,7 +2391,11 @@ def forecast_panels_view(request):
         ask_map = {}
         for row in qs:
             key = (row["origin"], row["destination"], row["forecast_date"])
-            ask_map[key] = row["ask"]
+            val = row["ask"]
+            if val is not None:
+                ask_map[key] = round(val)  # 取整
+            else:
+                ask_map[key] = 0  # 如果 ask 为 None，赋值为 0
 
         # 获取最新一次成功的预测时间（用 created_at）
         last_log = ForecastUpdateLog.objects.filter(status=2).order_by("-created_at").first()
@@ -2418,6 +2428,7 @@ def forecast_panels_view(request):
         return JsonResponse(
             {
                 "success": True,
+                "route_length": route_length,  # 返回航线总数
                 "data": {
                     "forecast_time": forecast_time_str,
                     "time_points": time_labels,
