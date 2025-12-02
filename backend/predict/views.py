@@ -2407,7 +2407,6 @@ def forecast_panels_view(request):
 
 
 @api_view(['GET'])
-@csrf_exempt
 def get_forecast_update_logs(request):
     """
     获取预测更新日志记录
@@ -2422,7 +2421,7 @@ def get_forecast_update_logs(request):
         limit = int(request.GET.get('limit', 3))
         
         # 获取最近N条记录（按创建时间倒序）
-        logs = ForecastUpdateLog.objects.all()[:limit]
+        logs = ForecastUpdateLog.objects.all().order_by('-created_at')[:limit]
         
         # 构建日志列表
         logs_data = []
@@ -2435,8 +2434,8 @@ def get_forecast_update_logs(request):
                 'status': log.get_status_display(),  # 获取状态文字形式
             })
         
-        # 获取最后一条状态为2（成功）的记录
-        last_success_log = ForecastUpdateLog.objects.filter(status=2).first()
+        # 获取最后一条状态为2（成功）的记录（按创建时间倒序）
+        last_success_log = ForecastUpdateLog.objects.filter(status=2).order_by('-created_at').first()
         last_success_data = None
         if last_success_log:
             last_success_data = {

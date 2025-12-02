@@ -32,5 +32,5 @@ urlpatterns = [
     path('forecast/update_topn/', views.trigger_update_forecast, name='update_topn'),
     path("forecast/update_ask/", views.update_forecast_ask_view, name="update_forecast_ask"),
     path("forecast/show/", views.forecast_panels_view, name="forecast_panels"),
-    path("forecast/logs/", views.get_forecast_update_logs, name="get_forecast_update_logs"),
+    path("forecast/update_topn_logs/", views.get_forecast_update_logs, name="get_forecast_update_logs"),
 ]
