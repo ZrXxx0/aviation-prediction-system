@@ -231,20 +231,33 @@ async function loadForecast() {
   loading.value = true
   try {
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.SHOW)
+
     const res = await axios.get(url, {
       params: {
         panels: selectedClasses.value.join(','),
-        time_granularity: granularity.value === '年度' ? 'yearly' : granularity.value === '季度' ? 'quarterly' : 'monthly',
+        time_granularity:
+          granularity.value === '年度'
+            ? 'yearly'
+            : granularity.value === '季度'
+            ? 'quarterly'
+            : 'monthly',
         steps: periods.value
       },
       timeout: 60000
     })
-    if (!res.data || !res.data.data) throw new Error('后端返回数据格式错误')
-    parseBackend(res.data.data)
-    prepareVisualData()
+    console.log('后端返回数据:', res.data.data)
+
+    if (!res.data.data || !res.data.data.panels) {
+      throw new Error('后端返回数据格式错误：缺少 panels')
+    }
+    parseBackend(res.data.data)          // 解析数据
+    prepareVisualData()             // 准备图表/表格数据
     if (viewMode.value !== 'table') renderChart()
     nextTick(() => chartInstance?.resize())
-    ElMessage.success(`数据加载成功，更新时间：${res.data.create_date || '未知'}`)
+
+    ElMessage.success(
+      `数据加载成功，更新时间：${res.data.data.forecast_time || '未知'}`
+    )
   } catch (err) {
     console.error(err)
     ElMessage.error('加载失败，请检查网络或后台接口')
@@ -254,79 +267,63 @@ async function loadForecast() {
 }
 
 function parseBackend(resp) {
+  // 重置
   dataStore.large = dataStore.medium = dataStore.small = null
   labels.value = []
+
   if (!resp) return
-
-  if (Array.isArray(resp.series) && resp.series.length) {
-    resp.series.forEach(s => {
-      const key = (s.cls || s.class || s.name || '').toLowerCase()
-      const obj = {
-        labels: Array.isArray(s.labels) ? s.labels.slice() : (Array.isArray(s.time) ? s.time.slice() : []),
-        routes: Array.isArray(s.routes) ? s.routes.slice() : (Array.isArray(s.data) ? s.data.map(r => r.name) : []),
-        data: Array.isArray(s.values) ? s.values.slice() : (Array.isArray(s.data) ? s.data.slice() : [])
-      }
-      if (key.includes('large')) dataStore.large = obj
-      else if (key.includes('medium')) dataStore.medium = obj
-      else if (key.includes('small')) dataStore.small = obj
-    })
-    labels.value = Array.isArray(dataStore.large?.labels) ? dataStore.large.labels.slice()
-      : Array.isArray(dataStore.medium?.labels) ? dataStore.medium.labels.slice()
-      : Array.isArray(dataStore.small?.labels) ? dataStore.small.labels.slice()
-      : genLabels()
-    return
+  if (Array.isArray(resp.time_points)) {
+    labels.value = resp.time_points.slice()
+  } else {
+    console.warn('缺少 time_points，使用 genLabels() 生成')
+    labels.value = genLabels()
   }
+  const panels = resp.panels || {}
 
-  const panels = ['large','medium','small']
-  panels.forEach(k => {
-    const panel = resp[k] || resp[k + '_panel'] || null
+  ;['large', 'medium', 'small'].forEach(cls => {
+    const panel = panels[cls]
+
     if (!panel) return
-    if (panel.headers && panel.rows && Array.isArray(panel.rows)) {
-      const hdr = Array.isArray(panel.headers) ? panel.headers.slice() : []
-      labels.value = Array.isArray(hdr) ? hdr.slice(1) : genLabels()
-      const routes = panel.rows.map(r => r[0])
-      const data = panel.rows.map(r => (Array.isArray(r) ? r.slice(1).map(v => Number(v) || 0) : []))
-      dataStore[k] = { labels: labels.value.slice(), routes, data }
-      return
-    }
-    if (Array.isArray(panel) && panel.length > 1 && Array.isArray(panel[0])) {
-      const hdr = panel[0]
-      labels.value = Array.isArray(hdr) ? hdr.slice(1) : genLabels()
-      const rows = panel.slice(1)
-      const routes = rows.map(r => r[0])
-      const data = rows.map(r => r.slice(1).map(v => Number(v) || 0))
-      dataStore[k] = { labels: labels.value.slice(), routes, data }
-      return
-    }
-    if (Array.isArray(panel) && panel.length === periods.value) {
-      labels.value = genLabels()
-      dataStore[k] = { labels: labels.value.slice(), routes: ['合计'], data: [panel.map(v => Number(v) || 0)] }
-      return
+    if (!Array.isArray(panel.rows)) return
+    const rows = panel.rows
+    // 第一列是 route，剩下是数据
+    const routes = rows.map(row => row[0])
+    const data = rows.map(row =>
+      row.slice(1).map(v => (isNaN(Number(v)) ? 0 : Number(v)))
+    )
+    dataStore[cls] = {
+      labels: labels.value.slice(),
+      routes,
+      data
     }
   })
-
-  if (!Array.isArray(labels.value) || !labels.value.length) {
-    if (Array.isArray(resp.labels)) labels.value = resp.labels.slice()
-    else labels.value = genLabels()
-  }
 }
 
 function prepareVisualData() {
-  if (!Array.isArray(labels.value) || !labels.value.length) labels.value = genLabels()
+  if (!Array.isArray(labels.value) || !labels.value.length) {
+    labels.value = genLabels()
+  }
+
   const build = (store, cls) => {
+    if (!store) return []
     const out = []
-    if (!store) return out
-    const routes = Array.isArray(store.routes) ? store.routes : []
-    const data = Array.isArray(store.data) ? store.data : []
-    for (let i = 0; i < routes.length; i++) out.push({ route: routes[i], values: data[i] || [], cls })
+    for (let i = 0; i < store.routes.length; i++) {
+      out.push({
+        route: store.routes[i],
+        values: store.data[i] || [],
+        cls
+      })
+    }
     return out
   }
 
   let combined = []
-  if (selectedClasses.value.includes('large')) combined = combined.concat(build(dataStore.large, 'large'))
-  if (selectedClasses.value.includes('medium')) combined = combined.concat(build(dataStore.medium, 'medium'))
-  if (selectedClasses.value.includes('small')) combined = combined.concat(build(dataStore.small, 'small'))
-
+  if (selectedClasses.value.includes('large'))
+    combined = combined.concat(build(dataStore.large, 'large'))
+  if (selectedClasses.value.includes('medium'))
+    combined = combined.concat(build(dataStore.medium, 'medium'))
+  if (selectedClasses.value.includes('small'))
+    combined = combined.concat(build(dataStore.small, 'small'))
   dataStore._prepared = Array.isArray(combined) ? combined : []
 }
 
@@ -647,7 +644,7 @@ watch(viewMode, (v) => {
 .data-show-page {
   padding: 12px;
   width: 100%;
-  box-sizing: border-box;
+  box-sizing: border-box; /* 统一设置 */
 }
 
 /* Controls */
@@ -657,6 +654,7 @@ watch(viewMode, (v) => {
   border-radius: 6px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
   margin-bottom: 12px;
+  box-sizing: border-box;
 }
 
 /* Content area */
@@ -665,86 +663,143 @@ watch(viewMode, (v) => {
   gap: 16px;
   align-items: stretch;
   width: 100%;
-  box-sizing: border-box;
   min-height: calc(100vh - 200px);
+  box-sizing: border-box;
 }
 
-/* Chart & table area */
+/* Chart & table container */
 .chart-area-wrap {
   flex: 1 1 auto;
-  min-width: 0;
+  min-width: 0; /* 允许收缩 */
   display: flex;
   flex-direction: column;
 }
+
+/* Table wrapper */
 .table-wrap {
   background: #fff;
   border-radius: 6px;
   padding: 8px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
   margin-bottom: 12px;
-  overflow: auto;
-  max-height: 520px;
+  flex: 1 1 auto;  /* 伸缩填满剩余空间 */
+  overflow: hidden; /* 避免多余空白 */
+  box-sizing: border-box;
 }
-/* inner wrapper ensures horizontal scroll when many columns */
-.table-inner { width: 100%; white-space: nowrap; }
 
-.chart-area {
+/* Inner table wrapper for horizontal scroll */
+.table-inner {
   width: 100%;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+/* 表格最大高度限制，内部滚动 */
+.el-table {
+  max-height: 700px !important;
+}
+
+/* Chart container */
+.chart-area {
   flex: 1 1 auto;
   min-height: 360px;
+  max-height: 700px;
   background: #fff;
   border-radius: 6px;
   padding: 8px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
   box-sizing: border-box;
-  overflow: auto; /* allow chart container to scroll both axes if large */
+  overflow: auto; /* 双轴滚动 */
+  width: 100%;
 }
 
-/* draggable visual cues */
-.draggable { cursor: grab; -webkit-user-select: none; -ms-user-select: none; user-select: none; }
-.draggable.dragging { cursor: grabbing !important; }
+/* Draggable cursor style */
+.draggable {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -ms-user-select: none;
+}
+.draggable.dragging {
+  cursor: grabbing !important;
+}
 
 /* Side panel */
 .side-panel {
-  width: 360px;
   flex: 0 0 360px;
+  width: 360px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+  box-sizing: border-box;
 }
-.small-help { color:#909399; font-size:12px; margin-left:6px }
 
+.small-help {
+  color: #909399;
+  font-size: 12px;
+  margin-left: 6px;
+}
+
+/* Responsive: medium screens */
 @media (max-width: 1100px) {
-  .content { flex-direction: column; min-height: auto; }
-  .side-panel { width: 100%; flex: 0 0 auto; }
-  .chart-area { min-height: 320px; }
+  .content {
+    flex-direction: column;
+    min-height: auto;
+  }
+  .side-panel {
+    flex: 0 0 auto;
+    width: 100%;
+  }
+  .chart-area {
+    min-height: 320px;
+    max-height: 500px;
+  }
 }
 
+/* Responsive: small screens */
 @media (max-width: 640px) {
-  .controls .el-col { width: 100% !important; display: block; margin-bottom: 8px; }
-  .chart-area { min-height: 280px; padding: 6px; }
-  .side-panel { padding-bottom: 8px; }
+  .controls .el-col {
+    width: 100% !important;
+    display: block;
+    margin-bottom: 8px;
+  }
+  .chart-area {
+    min-height: 280px;
+    max-height: 400px;
+    padding: 6px;
+  }
+  .side-panel {
+    padding-bottom: 8px;
+  }
 }
 
-/* side actions */
+/* Side actions buttons */
 .side-actions {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  align-items: stretch;
   width: 100%;
-  box-sizing: border-box;
   padding: 0;
+  box-sizing: border-box;
 }
+
 .side-actions .side-action-btn,
 .side-actions .el-button {
   width: 100%;
   margin: 0;
   max-width: none;
-  box-sizing: border-box;
   text-align: center;
+  box-sizing: border-box;
 }
 
-.card-header { font-weight:600; color:#333 }
-.btn-col { display:flex; align-items:center; justify-content:flex-end }
+.card-header {
+  font-weight: 600;
+  color: #333;
+}
+
+.btn-col {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
 </style>
