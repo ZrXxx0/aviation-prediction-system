@@ -692,24 +692,34 @@ async function updateForecastResult() {
     ElMessage.warning('暂无预测结果，无法更新')
     return
   }
-
   try {
     showProcessing.value = true
-    console.log('更新预测结果的请求体:', {
-      time_granularity: timeRange.value,
-      results: forecastResults.value
-    })
-  //   const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE_FORECAST) // 你需要确认后端对应的接口地址
-  //   const res = await axios.post(url, {
-  //     forecastResults: forecastResults.value
-  //   })
+    const granularityMap = { '年度': 'yearly', '季度': 'quarterly', '月度': 'monthly' }
+    const timeGranularityChinese = timeRange.value || (forecastResults.value[0]?.data?.model_info?.time_granularity) || '季度'
+    const granularity = granularityMap[timeGranularityChinese] || 'quarterly'
+    const data = []
 
-  //   if (res.data.success) {
-  //     ElMessage.success('预测结果更新成功')
-  //   } else {
-  //     ElMessage.error('更新预测结果失败')
-  //     console.error('更新失败：', res.data)
-  //   }
+    forecastResults.value.forEach(task => {
+      const origin = task.data.model_info.origin_airport
+      const destination = task.data.model_info.destination_airport
+      const preds = task.data.prediction_results
+
+      // 未来预测数据
+      preds.future_predictions?.forEach(item => {
+        data.push({
+          Origin: origin,
+          Destination: destination,
+          Time_point: item.time_point,
+          Value: item.value
+        })
+      })
+    })
+    const requestBody = {
+      granularity,
+      data
+    }
+    console.log('更新预测结果的请求体:', requestBody)
+
   } catch (error) {
     ElMessage.error('请求更新失败')
     console.error(error)
