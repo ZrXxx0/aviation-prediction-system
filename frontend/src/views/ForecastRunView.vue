@@ -608,76 +608,64 @@ function renderFromResults() {
     const { model_info, prediction_results } = item.data || {}
     const { origin_airport, destination_airport, model_type, train_mae, train_rmse, train_mape, train_r2 } = model_info || {}
     if (!prediction_results) return
-
     const hist = (prediction_results.historical_data || []).map(d => ({ ...d, type: 'train' }))
     const pred = (prediction_results.future_predictions || []).map(d => ({ ...d, type: 'predict' }))
-    const existed = (prediction_results.existed_data || []).map(d => ({ ...d, type: 'existed' }))
-    const allData = [...hist, ...pred, ...existed]
+    const existed = (prediction_results.exit_predictions || []).map(d => ({ ...d, type: 'existed' }))
+    
+    // 所有时间点标签，方便x轴使用
+    const labels = [...new Set([...hist, ...pred, ...existed].map(d => d.time_point))]
+    // x轴标签选择
+    xLabels = showTrain.value ? labels : pred.map(d => d.time_point)
 
-    // xLabels 按需设定，保证覆盖所有时间点
-    const histTimes = hist.map(d => d.time_point)
-    const predTimes = pred.map(d => d.time_point)
-    const existedTimes = existed.map(d => d.time_point)
-
-    // 取联合时间轴（去重并排序）
-    xLabels = Array.from(new Set([...histTimes, ...predTimes, ...existedTimes])).sort()
-
+    // 先构造 history+predict 的两条线（实线和虚线）
     if (showTrain.value) {
-      // 1. 历史+预测，历史实线，预测虚线
+      // history + predict
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type}) - Predict`,
+        name: `${origin_airport}→${destination_airport} (${model_type})`,
         type: 'line',
         smooth: true,
-        data: xLabels.map(time => {
-          const found = hist.find(d => d.time_point === time)
-          return found ? found.value : null
-        }),
+        data: [...hist.map(d => d.value), ...Array(pred.length).fill(null)],
         lineStyle: { type: 'solid' }
       })
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type}) - Predict`,
+        name: `${origin_airport}→${destination_airport} (${model_type})`,
         type: 'line',
         smooth: true,
-        data: xLabels.map(time => {
-          const found = pred.find(d => d.time_point === time)
-          return found ? found.value : null
-        }),
+        data: [...Array(hist.length).fill(null), ...pred.map(d => d.value)],
         lineStyle: { type: 'dashed' }
       })
 
-      // 2. 历史+已存在，历史实线，已存在虚线
+      // history + existed
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type}) - Existed`,
+        name: `${origin_airport}→${destination_airport}-历史预测`,
         type: 'line',
         smooth: true,
-        data: xLabels.map(time => {
-          const found = hist.find(d => d.time_point === time)
-          return found ? found.value : null
-        }),
+        data: [...hist.map(d => d.value), ...Array(existed.length).fill(null)],
         lineStyle: { type: 'solid' },
-        lineStyle: { type: 'solid', opacity: 0.5 } // 可以稍微调淡一点区分两组历史线
+        // 可以考虑给这条线换个颜色或样式，避免与上面冲突
+        // color: '#ff7f50'
       })
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type}) - Existed`,
+        name: `${origin_airport}→${destination_airport}-历史预测`,
         type: 'line',
         smooth: true,
-        data: xLabels.map(time => {
-          const found = existed.find(d => d.time_point === time)
-          return found ? found.value : null
-        }),
-        lineStyle: { type: 'dashed' }
+        data: [...Array(hist.length).fill(null), ...existed.map(d => d.value)],
+        lineStyle: { type: 'dashed' },
+        // color: '#ff7f50'
       })
     } else {
-      // 不显示历史，只画预测和已存在虚线
+      // 不显示历史，只显示预测
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type}) - Predict`,
+        name: `${origin_airport}→${destination_airport} (${model_type}) `,
         type: 'line',
         smooth: true,
         data: pred.map(d => d.value),
         lineStyle: { type: 'solid' }
       })
+
+      // 额外加上 existed 线（history 不显示时，没法组成 history+existed，直接只显示 existed 部分）
       allSeries.push({
-        name: `${origin_airport}→${destination_airport} (${model_type}) - Existed`,
+        name: `${origin_airport}→${destination_airport}-历史预测`,
         type: 'line',
         smooth: true,
         data: existed.map(d => d.value),

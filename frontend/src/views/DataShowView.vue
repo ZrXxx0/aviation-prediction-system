@@ -122,12 +122,37 @@
             <div class="card-header">操作</div>
           </template>
           <div class="side-actions">
-            <el-button class="side-action-btn" size="small" type="warning" @click="resetResults" :disabled="!hasData">结果重置</el-button>
+            <el-button class="side-action-btn" size="small" type="warning" @click="HistoryDialog" :disabled="!hasData">数据更新</el-button>
             <el-button class="side-action-btn" size="small" type="primary" @click="exportData" :disabled="!hasData">数据导出</el-button>
           </div>
         </el-card>
       </div>
     </div>
+
+    <!-- 数据更新弹窗 -->
+    <el-dialog
+      v-model="updateDialogVisible"
+      title="数据更新记录"
+      width="600px"
+    >
+      <!-- 表格 -->
+      <el-table :data="updateLogs" stripe size="small" style="width: 100%">
+        <el-table-column prop="start_time" label="开始时间" width="180" />
+        <el-table-column prop="end_time" label="结束时间" width="180" />
+        <el-table-column prop="status" label="状态" min-width="120" />
+      </el-table>
+
+      <!-- 底部按钮 -->
+      <div style="text-align:center; margin-top: 20px;">
+        <el-button
+          type="primary"
+          :disabled="!canUpdate"
+          @click="doUpdate"
+        >
+          执行更新
+        </el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -138,6 +163,48 @@ import axios from 'axios' // 保留：切换到后端时可以使用
 import apiConfig from '@/config/api.js' // 保留：示例（未必立即使用）
 import { ElMessage } from 'element-plus'
 import * as XLSX from 'xlsx'
+
+const updateDialogVisible = ref(false)
+const updateLogs = ref([])          // 表格数据
+const canUpdate = ref(false)        // 是否允许点击按钮
+
+// 打开弹窗时触发
+const HistoryDialog = () => {
+  updateDialogVisible.value = true
+  loadUpdateStatus()
+}
+
+// 调接口获取数据
+const loadUpdateStatus = async () => {
+  try {
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.LOGS)
+    const res = await axios.get(url)
+
+    console.log('更新记录返回数据：', res.data)
+    if (res.data?.success) {
+      const data = res.data.data
+      updateLogs.value = data.logs || []
+      canUpdate.value = data.can_update
+    }
+  } catch (err) {
+    console.error('加载更新记录失败:', err)
+  }
+}
+
+// 点击更新按钮事件
+const doUpdate = async () => {
+  if (!canUpdate.value) return
+  try {
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE)
+    const res = await axios.post(url)
+    if (res.data?.success) {
+      ElMessage.success('更新已开始')
+      updateDialogVisible.value = false
+    }
+  } catch (err) {
+    ElMessage.error('更新失败')
+  }
+}
 
 const granularity = ref('年度')
 const years = ref(10)
@@ -177,18 +244,19 @@ async function loadForecast() {
   loading.value = true
   try {
     // 构造请求参数（GET 请求使用 query 参数）
-    const params = {
-      classes: selectedClasses.value.join(','), // 逗号分隔
-      granularity: granularity.value === '年度' ? 'yearly' : granularity.value === '季度' ? 'quarterly' : 'monthly',
-      periods: periods.value
-    }
-
-    // 假设接口地址是 /api/panel-data，请根据实际替换
-    const res = await axios.get('/api/panel-data', { params, timeout: 60000 })
-
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.SHOW)
+    const res = await axios.get(url, {
+      params : {
+      panels: selectedClasses.value.join(','), // 逗号分隔
+      time_granularity: granularity.value === '年度' ? 'yearly' : granularity.value === '季度' ? 'quarterly' : 'monthly',
+      steps: periods.value
+    },
+      timeout: 60000
+    })
     if (!res.data || !res.data.data) {
       throw new Error('后端返回数据格式错误')
     }
+    console.log('后端返回数据：', res.data.data)
 
     // 后端返回示例：{ create_date: '2025-12-02', data: { large: {...}, medium: {...}, small: {...} } }
     parseBackend(res.data.data)
