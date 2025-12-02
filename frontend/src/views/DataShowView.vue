@@ -101,7 +101,7 @@
             <el-descriptions-item label="选择粒度">{{ granularity }}</el-descriptions-item>
             <el-descriptions-item label="长度（年）">{{ years }}</el-descriptions-item>
             <el-descriptions-item label="周期数">{{ periods }}</el-descriptions-item>
-            <el-descriptions-item label="总计算航线数">{{ preparedCount }}</el-descriptions-item>
+            <el-descriptions-item label="总计算航线数">{{ total_count }}</el-descriptions-item>
           </el-descriptions>
         </el-card>
 
@@ -200,6 +200,7 @@ const doUpdate = async () => {
 /* ------------------ main state ------------------ */
 const granularity = ref('年度')
 const years = ref(10)
+let total_count = ref(null)
 const selectedClasses = ref(['large'])
 const viewMode = ref('table')
 const loading = ref(false)
@@ -251,6 +252,8 @@ async function loadForecast() {
     if (!res.data.data || !res.data.data.panels) {
       throw new Error('后端返回数据格式错误：缺少 panels')
     }
+    total_count.value = res.data.data.route_length
+    console.log('总计算航线数:', total_count.value)
     parseBackend(res.data.data)          // 解析数据
     prepareVisualData()             // 准备图表/表格数据
     if (viewMode.value !== 'table') renderChart()
