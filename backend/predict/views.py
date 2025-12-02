@@ -158,19 +158,13 @@ def attach_existing_ask_predictions(item):
 
             # ===== 年度 =====
             elif gran == 'yearly':
-                # 纯年份: "2024"
-                if s.isdigit() and len(s) == 4:
-                    return date(int(s), 1, 1)
-
-                # "2024-1-1" / "2024-01-01" 或 "2024-1" / "2024-01"
-                for fmt in ('%Y-%m-%d', '%Y-%m'):
-                    try:
-                        dt = datetime.strptime(s, fmt).date()
-                        return date(dt.year, 1, 1)
-                    except ValueError:
-                        continue
-
+                # 从字符串里提取第一个 4 位数字当作年份，支持 "2023年" 这种
+                m = re.search(r'(\d{4})', s)
+                if m:
+                    year = int(m.group(1))
+                    return date(year, 1, 1)
                 raise ValueError(f'不支持的年度时间格式: {tp}')
+
 
             # ===== 季度 =====
             elif gran == 'quarterly':
@@ -254,6 +248,101 @@ def attach_existing_ask_predictions(item):
     except Exception:
         # 不让它影响主流程，有需要你可以改成 logging
         return item
+
+def parse_forecast_date(granularity: str, s: str) -> date:
+    """
+    根据 time_granularity 把前端传来的 forecast_date 字符串
+    解析成真正存库用的 Date 对象。
+
+    支持的示例（可以混用）：
+
+    monthly:
+      "2024-06"
+      "2024-06-01"
+
+    yearly:
+      "2024"
+      "2024-1" / "2024-01"
+      "2024-1-1" / "2024-01-01"
+
+    quarterly:
+      "2024-Q1"
+      "2024-1" / "2024-4"  -> 把后面的当“月份”，按月份推所属季度
+      "2024-01-01"        -> 按月份推所属季度
+
+    解析结果：
+      - monthly   -> 该月 1 号
+      - quarterly -> 该季度起始月的 1 号
+      - yearly    -> 当年 1 月 1 号
+    """
+    s = (s or "").strip()
+    if not s:
+        raise ValueError("forecast_date 不能为空")
+
+    # ===== 月度 =====
+    if granularity == "monthly":
+        for fmt in ("%Y-%m-%d", "%Y-%m"):
+            try:
+                dt = datetime.strptime(s, fmt).date()
+                return dt.replace(day=1)
+            except ValueError:
+                continue
+        raise ValueError(f"不支持的月度时间格式: {s}（推荐 2024-06 或 2024-06-01）")
+
+    # ===== 年度 =====
+    if granularity == "yearly":
+        # 纯年份: "2024"
+        if s.isdigit() and len(s) == 4:
+            return date(int(s), 1, 1)
+
+        # "2024-1-1" / "2024-01-01" / "2024-1" / "2024-01"
+        for fmt in ("%Y-%m-%d", "%Y-%m"):
+            try:
+                dt = datetime.strptime(s, fmt).date()
+                return date(dt.year, 1, 1)
+            except ValueError:
+                continue
+
+        raise ValueError(f"不支持的年度时间格式: {s}（推荐 2024 或 2024-01-01）")
+
+    # ===== 季度 =====
+    if granularity == "quarterly":
+        # 1) "2024-Q1"
+        m = re.match(r"^(\d{4})-Q([1-4])$", s, re.IGNORECASE)
+        if m:
+            year = int(m.group(1))
+            q = int(m.group(2))
+            start_month = (q - 1) * 3 + 1
+            return date(year, start_month, 1)
+
+        # 2) "2024-1" / "2024-4" -> 按月份推季度
+        m = re.match(r"^(\d{4})-(\d{1,2})$", s)
+        if m:
+            year = int(m.group(1))
+            month = int(m.group(2))
+            q = (month - 1) // 3 + 1
+            start_month = (q - 1) * 3 + 1
+            return date(year, start_month, 1)
+
+        # 3) "2024-01-01" -> 用日期的月份推季度
+        try:
+            dt = datetime.strptime(s, "%Y-%m-%d").date()
+            month = dt.month
+            q = (month - 1) // 3 + 1
+            start_month = (q - 1) * 3 + 1
+            return date(dt.year, start_month, 1)
+        except ValueError:
+            pass
+
+        raise ValueError(f"不支持的季度时间格式: {s}（推荐 2024-Q1 或 2024-01-01）")
+
+    # 兜底：如果粒度写错了，这里也试着按日期解析
+    for fmt in ("%Y-%m-%d", "%Y-%m"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(f"不支持的时间格式: {s}")
 
 
 # 获取预测模型函数
@@ -1916,7 +2005,7 @@ def update_forecast_ask_view(request):
             {
                 "origin": "CAN",
                 "destination": "PEK",
-                "forecast_date": "2024-01-01",  // 一定是 YYYY-MM-DD
+                "forecast_date": "2024-01-01" / "2024-01" / "2024" / "2024-Q1" 等,
                 "ask": 12345.6
             },
             ...
@@ -1975,12 +2064,8 @@ def update_forecast_ask_view(request):
             if ask_val is None:
                 raise ValueError("ask 不能为空")
 
-            # 前端保证是 "YYYY-MM-DD"
-            try:
-                forecast_date = datetime.strptime(fd_str, "%Y-%m-%d").date()
-            except ValueError:
-                raise ValueError(f"forecast_date 格式必须为 YYYY-MM-DD，当前为: {fd_str}")
-
+            # 使用缓和解析逻辑
+            forecast_date = parse_forecast_date(gran, fd_str)
             ask_float = float(ask_val)
 
             parsed_items.append(
@@ -2033,6 +2118,7 @@ def update_forecast_ask_view(request):
             },
         }
     )
+
 
 import csv
 import os
