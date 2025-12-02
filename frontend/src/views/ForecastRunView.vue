@@ -719,7 +719,9 @@ async function updateForecastResult() {
       data
     }
     console.log('更新预测结果的请求体:', requestBody)
-
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE)
+    const res = await axios.post(url, requestBody)
+    ElMessage.success('数据已更新到数据库中')
   } catch (error) {
     ElMessage.error('请求更新失败')
     console.error(error)

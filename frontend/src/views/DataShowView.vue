@@ -186,7 +186,7 @@ const loadUpdateStatus = async () => {
 const doUpdate = async () => {
   if (!canUpdate.value) return
   try {
-    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE)
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE_ALL)
     const res = await axios.post(url)
     if (res.data?.success) {
       ElMessage.success('更新已开始')
@@ -214,9 +214,10 @@ const labels = ref([])
 
 const periods = computed(() => {
   const y = Math.max(1, Math.min(20, Number(years.value) || 1))
-  if (granularity.value === '年度') return y
-  if (granularity.value === '季度') return y * 4
-  return y * 12
+  // if (granularity.value === '年度') return y
+  // if (granularity.value === '季度') return y * 4
+  // return y * 12
+  return y
 })
 
 const hasData = computed(() => (Array.isArray(dataStore._prepared) && dataStore._prepared.length > 0))
@@ -677,33 +678,42 @@ watch(viewMode, (v) => {
 
 /* Table wrapper */
 .table-wrap {
+  /* 保持固定高度，提供滚动容器 */
+  max-height: 800px;  /* 或你想要的高度 */
+  overflow-y: auto;
+  margin-bottom: 0;
   background: #fff;
   border-radius: 6px;
   padding: 8px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
-  margin-bottom: 12px;
-  flex: 1 1 auto;  /* 伸缩填满剩余空间 */
-  overflow: hidden; /* 避免多余空白 */
   box-sizing: border-box;
+  /* 确保宽度100% */
+  width: 100%;
+  display: flex;
+  flex-direction: column;
 }
 
-/* Inner table wrapper for horizontal scroll */
 .table-inner {
-  width: 100%;
-  white-space: nowrap;
+  /* 让inner撑满table-wrap高度 */
+  min-width: 100%;
+  /* 取消原来的overflow-x，防止双滚动 */
   overflow-x: auto;
+  overflow-y: unset;
+  /* 让高度自适应或填满 */
+  flex: 1 1 auto;
+  white-space: nowrap;
 }
 
 /* 表格最大高度限制，内部滚动 */
 .el-table {
-  max-height: 700px !important;
+  max-height: 800px !important;
 }
 
 /* Chart container */
 .chart-area {
   flex: 1 1 auto;
   min-height: 360px;
-  max-height: 700px;
+  max-height: 800px;
   background: #fff;
   border-radius: 6px;
   padding: 8px;

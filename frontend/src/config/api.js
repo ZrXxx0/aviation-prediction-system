@@ -38,7 +38,8 @@ const API_ENDPOINTS = {
   },
   // 预测相关API
   PREDICT: {
-    UPDATE: '/predict/forecast/update_topn/',
+    UPDATE: '/predict/forecast/update_ask/',
+    UPDATE_ALL: '/predict/forecast/update_topn/',
     LOGS: '/predict/forecast/update_topn_logs/',
     SHOW: '/predict/forecast/show/',
     MODELS: '/predict/forecast/models/',
