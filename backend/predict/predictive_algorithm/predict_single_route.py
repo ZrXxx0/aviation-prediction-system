@@ -132,7 +132,7 @@ def predict_single_route(prediction_request):
         while last_complete_date.month not in [1, 4, 7, 10]:
             last_complete_date -= pd.DateOffset(months=1)
     elif time_granularity == 'yearly':
-        while last_complete_date.month != 12:
+        while last_complete_date.month != 1:
             last_complete_date -= pd.DateOffset(months=1)
 
     # 执行预测
