@@ -2125,7 +2125,7 @@ import os
 from django.conf import settings
 
 ROUTE_RANKING_CSV = os.path.join(
-    settings.BASE_DIR, "backend", "Predict_Datas", "route_ranking.csv"
+    settings.BASE_DIR, "Predict_Datas", "route_ranking.csv"
 )
 
 
@@ -2144,17 +2144,20 @@ def get_routes_from_csv(panel_type: str):
       - destination
     """
     routes = []
-
+    # print("11111")
     if not os.path.exists(ROUTE_RANKING_CSV):
+        print("CSV not exists:", ROUTE_RANKING_CSV)
         return routes
 
     with open(ROUTE_RANKING_CSV, newline="", encoding="utf-8") as f:
+
         reader = csv.DictReader(f)
+        # print("CSV fields:", reader.fieldnames)
 
         # 行号从 1 开始数（更直观一点）
         for idx, row in enumerate(reader, start=1):
-            origin = row.get("origin")
-            dest = row.get("destination")
+            origin = row.get("Origin")
+            dest = row.get("Destination")
 
             # 跳过字段缺失的行
             if not origin or not dest:
@@ -2177,7 +2180,7 @@ def get_routes_from_csv(panel_type: str):
             elif panel_type == "small":
                 # 小运力后面再处理，这里先不返回任何航线
                 pass
-
+    print(f"panel_type={panel_type}, routes_count={len(routes)}")
     return routes
 
 
@@ -2286,16 +2289,23 @@ def forecast_panels_view(request):
                 {"success": False, "error": "steps 必须是整数"},
                 status=400,
             )
+        # 解析 panels 参数：同时兼容 panels=large,medium 和 panels=large&panels=medium
+        raw_list = request.GET.getlist("panels")  # 可能是 ["large,medium,small"] 或 ["large", "medium"]
+        panel_types = []
 
-        # 解析 panels 参数
-        panel_types = request.GET.getlist("panels")
+        for entry in raw_list:
+            panel_types.extend(
+                [p.strip() for p in entry.split(",") if p.strip()]
+            )
+
         if not panel_types:
+            # 再兜底一下单个 panels 的情况（比如有人只用 get）
             raw = request.GET.get("panels", "")
             if raw:
                 panel_types = [p.strip() for p in raw.split(",") if p.strip()]
+
         if not panel_types:
-            # 默认只返回 large
-            panel_types = ["large"]
+            panel_types = ["large"]  # 默认
 
         # 生成时间轴
         forecast_dates, time_labels = build_periods(gran, start_year, steps)
@@ -2321,6 +2331,7 @@ def forecast_panels_view(request):
 
             panel_routes[p] = routes
             all_routes.update(routes)
+            # print(all_routes)
 
         # 如果一个航线都没有，就直接返回空结构
         if not all_routes:
