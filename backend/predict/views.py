@@ -2404,3 +2404,66 @@ def forecast_panels_view(request):
             },
             status=500,
         )
+
+
+@api_view(['GET'])
+@csrf_exempt
+def get_forecast_update_logs(request):
+    """
+    获取预测更新日志记录
+    参数:
+        limit (可选): 需要返回的记录数，默认3条
+    返回:
+        logs: 最近N条日志记录列表，每条包含id、三个时间字段、状态（文字形式）
+        last_success: 最后一条状态为2（成功）的记录
+    """
+    try:
+        # 获取limit参数，默认为3
+        limit = int(request.GET.get('limit', 3))
+        
+        # 获取最近N条记录（按创建时间倒序）
+        logs = ForecastUpdateLog.objects.all()[:limit]
+        
+        # 构建日志列表
+        logs_data = []
+        for log in logs:
+            logs_data.append({
+                'id': log.id,
+                'created_at': log.created_at.strftime("%Y-%m-%d %H:%M:%S") if log.created_at else None,
+                'start_time': log.start_time.strftime("%Y-%m-%d %H:%M:%S") if log.start_time else None,
+                'end_time': log.end_time.strftime("%Y-%m-%d %H:%M:%S") if log.end_time else None,
+                'status': log.get_status_display(),  # 获取状态文字形式
+            })
+        
+        # 获取最后一条状态为2（成功）的记录
+        last_success_log = ForecastUpdateLog.objects.filter(status=2).first()
+        last_success_data = None
+        if last_success_log:
+            last_success_data = {
+                'id': last_success_log.id,
+                'created_at': last_success_log.created_at.strftime("%Y-%m-%d %H:%M:%S") if last_success_log.created_at else None,
+                'start_time': last_success_log.start_time.strftime("%Y-%m-%d %H:%M:%S") if last_success_log.start_time else None,
+                'end_time': last_success_log.end_time.strftime("%Y-%m-%d %H:%M:%S") if last_success_log.end_time else None,
+                'status': last_success_log.get_status_display(),
+            }
+        
+        return JsonResponse({
+            'success': True,
+            'data': {
+                'logs': logs_data,
+                'last_success': last_success_data,
+            }
+        })
+        
+    except ValueError:
+        return JsonResponse({
+            'success': False,
+            'message': 'limit参数必须是有效的整数'
+        }, status=400)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({
+            'success': False,
+            'message': f'服务器错误: {str(e)}'
+        }, status=500)
