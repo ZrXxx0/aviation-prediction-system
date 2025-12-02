@@ -2415,6 +2415,7 @@ def get_forecast_update_logs(request):
     返回:
         logs: 最近N条日志记录列表，每条包含id、三个时间字段、状态（文字形式）
         last_success: 最后一条状态为2（成功）的记录
+        can_update: 当前是否可以更新（布尔值）
     """
     try:
         # 获取limit参数，默认为3
@@ -2446,11 +2447,26 @@ def get_forecast_update_logs(request):
                 'status': last_success_log.get_status_display(),
             }
         
+        # 判断当前是否可以更新（参考 trigger_update_forecast 的逻辑）
+        TIMEOUT_HOURS = 48
+        last_task = ForecastUpdateLog.objects.order_by('-created_at').first()
+        can_update = True
+        
+        if last_task:
+            # 如果是 Pending 或 Running
+            if last_task.status in [0, 1]:
+                # 检查是否超时 (防止死锁)
+                time_since_start = timezone.now() - last_task.created_at
+                if time_since_start.total_seconds() < TIMEOUT_HOURS * 3600:
+                    # 确实正在跑，且没超时
+                    can_update = False
+        
         return JsonResponse({
             'success': True,
             'data': {
                 'logs': logs_data,
                 'last_success': last_success_data,
+                'can_update': can_update,
             }
         })
         
