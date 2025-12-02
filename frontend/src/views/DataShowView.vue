@@ -214,10 +214,10 @@ const labels = ref([])
 
 const periods = computed(() => {
   const y = Math.max(1, Math.min(20, Number(years.value) || 1))
-  // if (granularity.value === '年度') return y
-  // if (granularity.value === '季度') return y * 4
-  // return y * 12
-  return y
+  if (granularity.value === '年度') return y
+  if (granularity.value === '季度') return y * 4
+  return y * 12
+  // return y
 })
 
 const hasData = computed(() => (Array.isArray(dataStore._prepared) && dataStore._prepared.length > 0))
@@ -242,7 +242,7 @@ async function loadForecast() {
             : granularity.value === '季度'
             ? 'quarterly'
             : 'monthly',
-        steps: periods.value
+        steps: years.value
       },
       timeout: 60000
     })
