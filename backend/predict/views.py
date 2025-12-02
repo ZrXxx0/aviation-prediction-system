@@ -1549,6 +1549,11 @@ def flight_market_upload_commit(request):
                 # 跳过系统管理的字段
                 if field_name in excluded_fields:
                     continue
+
+                # qty增加下面三行
+                # 关键逻辑：如果这一列在 CSV 里是空的，就不覆盖原值
+                if value is None or (isinstance(value, str) and value.strip() == ""):
+                    continue
                     
                 if field_name in ("year_month", "origin", "destination", "equipment", "region"):
                     setattr(obj, field_name, value)
@@ -1682,13 +1687,13 @@ def upload_insert(request):
     try:
         data = json.loads(request.body)
         csv_content = data.get('content', '')
-        
+
         if not csv_content:
             return JsonResponse({
                 'success': False,
                 'message': '缺少 CSV 内容'
             }, status=400)
-        
+
         # 解析 CSV
         try:
             all_rows = parse_csv_content(csv_content)
@@ -1697,13 +1702,13 @@ def upload_insert(request):
                 'success': False,
                 'message': f'解析失败: {str(e)}'
             }, status=400)
-        
+
         if not all_rows:
             return JsonResponse({
                 'success': False,
                 'message': 'CSV 文件为空或格式不正确'
             }, status=400)
-        
+
         # 检查是否有冲突（不应该有，但为了安全还是检查）
         conflict_count = sum(1 for row in all_rows if row['has_conflict'])
         if conflict_count > 0:
@@ -1711,7 +1716,7 @@ def upload_insert(request):
                 'success': False,
                 'message': f'检测到 {conflict_count} 条冲突数据，请先处理冲突'
             }, status=400)
-        
+
         # 插入数据
         created_count = 0
         with transaction.atomic():
@@ -1721,10 +1726,10 @@ def upload_insert(request):
                 origin = data.get('origin', '').strip().upper()
                 dest = data.get('destination', '').strip().upper()
                 equipment = data.get('equipment', '').strip()
-                
+
                 if not ym or not origin or not dest:
                     continue
-                
+
                 # 创建新记录
                 obj = FlightMarketRecord()
                 # 系统管理的字段，不参与设置
@@ -1733,7 +1738,7 @@ def upload_insert(request):
                     # 跳过系统管理的字段
                     if field_name in excluded_fields:
                         continue
-                    
+
                     if field_name in ('year_month', 'origin', 'destination', 'equipment', 'region'):
                         setattr(obj, field_name, value)
                     elif field_name == 'international_flight':
@@ -1743,19 +1748,19 @@ def upload_insert(request):
                             setattr(obj, field_name, str(value).lower() in ('true', '1', 'y', 'yes'))
                     else:
                         setattr(obj, field_name, _to_decimal_or_none(value))
-                
+
                 try:
                     obj.save()
                     created_count += 1
                 except Exception as e:
                     # 忽略唯一约束冲突（可能并发插入）
                     continue
-        
+
         return JsonResponse({
             'success': True,
             'message': f'成功插入 {created_count} 条数据'
         })
-        
+
     except json.JSONDecodeError:
         return JsonResponse({
             'success': False,
@@ -1860,7 +1865,10 @@ def upload_resolve(request):
                     # 跳过系统管理的字段
                     if field_name in excluded_fields:
                         continue
-                    
+                    # qty增加下面三行
+                    # 空值不更新，保留原来的
+                    if value is None or (isinstance(value, str) and value.strip() == ""):
+                        continue
                     if field_name in ('year_month', 'origin', 'destination', 'equipment', 'region'):
                         setattr(obj, field_name, value)
                     elif field_name == 'international_flight':
@@ -2000,17 +2008,22 @@ def update_forecast_ask_view(request):
 
     请求体：
     {
-        "time_granularity": "monthly" | "quarterly" | "yearly",
-        "results": [
-            {
-                "origin": "CAN",
-                "destination": "PEK",
-                "forecast_date": "2024-01-01" / "2024-01" / "2024" / "2024-Q1" 等,
-                "ask": 12345.6
-            },
-            ...
-        ]
-    }
+    "granularity": "quarterly",
+    "data": [
+        {
+            "Origin": "CTU",
+            "Destination": "SHA",
+            "Time_point": "2024-Q2",
+            "Value": 519284316.51573217
+        },
+        {
+            "Origin": "CTU",
+            "Destination": "SHA",
+            "Time_point": "2024-Q3",
+            "Value": 623316619.0815556
+        }
+    ]
+}
     """
     # 1. 解析 JSON
     try:
@@ -2021,8 +2034,8 @@ def update_forecast_ask_view(request):
             status=400,
         )
 
-    gran = body.get("time_granularity")
-    results = body.get("results") or []
+    gran = body.get("granularity")
+    results = body.get("data") or []
 
     # 2. 校验粒度
     if gran not in ("monthly", "quarterly", "yearly"):
@@ -2052,17 +2065,17 @@ def update_forecast_ask_view(request):
     # 5. 逐条解析 & 基础校验
     for idx, row in enumerate(results):
         try:
-            origin = row.get("origin")
-            destination = row.get("destination")
-            fd_str = row.get("forecast_date")
-            ask_val = row.get("ask")
+            origin = row.get("Origin")
+            destination = row.get("Destination")
+            fd_str = row.get("Time_point")
+            ask_val = row.get("Value")
 
             if not origin or not destination:
                 raise ValueError("origin/destination 不能为空")
             if not fd_str:
-                raise ValueError("forecast_date 不能为空")
+                raise ValueError("Time_point 不能为空")
             if ask_val is None:
-                raise ValueError("ask 不能为空")
+                raise ValueError("Value 不能为空")
 
             # 使用缓和解析逻辑
             forecast_date = parse_forecast_date(gran, fd_str)
