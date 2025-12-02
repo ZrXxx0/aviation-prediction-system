@@ -2428,8 +2428,8 @@ def forecast_panels_view(request):
         return JsonResponse(
             {
                 "success": True,
-                "route_length": route_length,  # 返回航线总数
                 "data": {
+                    "route_length": route_length,  # 返回航线总数
                     "forecast_time": forecast_time_str,
                     "time_points": time_labels,
                     "panels": panels_data,
