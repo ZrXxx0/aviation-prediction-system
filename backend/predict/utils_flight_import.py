@@ -5,6 +5,11 @@ import io
 from .models import (FlightMarketRecord)
 
 COLUMN_MAPPING = {
+    "route_total_flights": "route_total_flights",
+    "route_total_seats": "route_total_seats",
+    "Seats":"equipment_total_seats",
+    "Frequency":"equipment_total_flights",
+    "Time series": "year_month",
     "YearMonth": "year_month",
     "Origin": "origin",
     "Destination": "destination",
@@ -142,8 +147,80 @@ def parse_csv_content(csv_content):
     except Exception as e:
         raise ValueError(f"CSV 解析失败: {str(e)}")
 
-    rows = []
+    # ===========================
+    if df is not None and not df.empty:
+        cols = list(df.columns)
+        print(cols)
 
+        # 1. 判断是否已经有 route_total_*（包含首字母大写版本）
+        has_route_flights = ("route_total_flights" in cols) or ("Route_total_flights" in cols)
+        has_route_seats = ("route_total_seats" in cols) or ("Route_total_seats" in cols)
+
+        # 只在“完全没有这两列”的时候才自动算
+        if not has_route_flights and not has_route_seats:
+            # 2. 找 Frequency / Seats 或 equipment_total_* 作为数据源
+
+            # 座位来源：优先 Seats，其次 equipment_total_seats / Equipment_total_seats
+            seats_source_col = None
+            if "Seats" in cols:
+                seats_source_col = "Seats"
+            elif "equipment_total_seats" in cols:
+                seats_source_col = "equipment_total_seats"
+            elif "Equipment_total_seats" in cols:
+                seats_source_col = "Equipment_total_seats"
+
+            # 班次来源：优先 Frequency，其次 equipment_total_flights / Equipment_total_flights
+            flights_source_col = None
+            if "Frequency" in cols:
+                flights_source_col = "Frequency"
+            elif "equipment_total_flights" in cols:
+                flights_source_col = "equipment_total_flights"
+            elif "Equipment_total_flights" in cols:
+                flights_source_col = "Equipment_total_flights"
+
+            # 如果两个源都完全没有，就不要算了，后面逻辑照旧
+            if seats_source_col or flights_source_col:
+                # 3. 找分组维度：年月 + 起点 + 终点 + 机型（同一航线同一日期不同机型）
+                # year_month 有可能叫 Time series，你之前已经在 COLUMN_MAPPING 那边处理过，
+                # 这里再兜一层。
+                if "year_month" in cols:
+                    ym_col = "year_month"
+                elif "Time series" in cols:
+                    ym_col = "Time series"
+                else:
+                    ym_col = None
+
+                # origin / destination 可能有 *_code，这里都兼容一下
+                if "Origin" in cols:
+                    origin_col = "Origin"
+                elif "origin_code" in cols:
+                    origin_col = "origin_code"
+                else:
+                    origin_col = None
+
+                if "Destination" in cols:
+                    dest_col = "Destination"
+                elif "destination_code" in cols:
+                    dest_col = "destination_code"
+                else:
+                    dest_col = None
+
+                equip_col = "equipment" if "equipment" in cols else None
+
+                group_cols = [c for c in [ym_col, origin_col, dest_col] if c]
+                # 只有当这些关键维度列存在时才做聚合
+                if group_cols:
+                    if flights_source_col:
+                        # 同一 (年月+航线) 的 Frequency / equipment_total_flights 求和
+                        df["route_total_flights"] = df.groupby(group_cols)[flights_source_col].transform("sum")
+                        print(df["route_total_flights"])
+                    if seats_source_col:
+                        # 同一 (年月+航线) 的 Seats / equipment_total_seats 求和
+                        df["route_total_seats"] = df.groupby(group_cols)[seats_source_col].transform("sum")
+                        print(df["route_total_seats"])
+
+    rows = []
+    print(df)
     for i, row in df.iterrows():
         data = {}
         for col_name, field_name in COLUMN_MAPPING.items():
@@ -203,7 +280,7 @@ def parse_csv_content(csv_content):
                     except Exception:
                         # 跳过无法访问的字段
                         continue
-
+        print(data)
         rows.append({
             "index": len(rows),
             "key": key,

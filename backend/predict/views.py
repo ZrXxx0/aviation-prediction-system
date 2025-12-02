@@ -1445,6 +1445,7 @@ def flight_market_upload_preview(request):
     auto_created = 0
 
     with transaction.atomic():
+        model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
         for row in all_rows:
             data = row["data"]
             ym = data.get("year_month")
@@ -1459,6 +1460,8 @@ def flight_market_upload_preview(request):
                 for field_name, value in data.items():
                     # 跳过系统管理的字段
                     if field_name in excluded_fields:
+                        continue
+                    if field_name not in model_field_names:
                         continue
                     
                     if field_name in ("year_month", "origin", "destination", "equipment", "region"):
@@ -1515,6 +1518,7 @@ def flight_market_upload_commit(request):
     now = timezone.now()
 
     with transaction.atomic():
+        model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
         for row in rows:
             action = row.get("action", "skip")
             data = row.get("data") or {}
@@ -1550,7 +1554,9 @@ def flight_market_upload_commit(request):
                 if field_name in excluded_fields:
                     continue
 
-                # qty增加下面三行
+                # qty增加下面
+                if field_name not in model_field_names:
+                    continue
                 # 关键逻辑：如果这一列在 CSV 里是空的，就不覆盖原值
                 if value is None or (isinstance(value, str) and value.strip() == ""):
                     continue
@@ -1720,6 +1726,7 @@ def upload_insert(request):
         # 插入数据
         created_count = 0
         with transaction.atomic():
+            model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
             for row in all_rows:
                 data = row['data']
                 ym = data.get('year_month', '').strip()
@@ -1738,7 +1745,8 @@ def upload_insert(request):
                     # 跳过系统管理的字段
                     if field_name in excluded_fields:
                         continue
-
+                    if field_name not in model_field_names:
+                        continue
                     if field_name in ('year_month', 'origin', 'destination', 'equipment', 'region'):
                         setattr(obj, field_name, value)
                     elif field_name == 'international_flight':
@@ -1821,6 +1829,7 @@ def upload_resolve(request):
         now = timezone.now()
         
         with transaction.atomic():
+            model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
             for decision in decisions:
                 key = decision.get('key', '')
                 action = decision.get('action', 'keep')
@@ -1865,7 +1874,9 @@ def upload_resolve(request):
                     # 跳过系统管理的字段
                     if field_name in excluded_fields:
                         continue
-                    # qty增加下面三行
+                    # qty增加下面
+                    if field_name not in model_field_names:
+                        continue
                     # 空值不更新，保留原来的
                     if value is None or (isinstance(value, str) and value.strip() == ""):
                         continue
@@ -2337,7 +2348,7 @@ def forecast_panels_view(request):
         for p in panel_types:
             if p == "small":
                 # 小运力：直接用数据库中的汇总航线 other-other
-                routes = [("other", "other")]
+                routes = [("Other", "Other")]
             else:
                 # large / medium 还是按 csv 来
                 routes = get_routes_from_csv(p)
