@@ -1,4 +1,3 @@
-
 from django.conf import settings
 from collections import OrderedDict
 import datetime
@@ -102,7 +101,7 @@ def get_fleet_proportions(records_for_fleet):
     fleet_proportions = {fleet_type: flights / total_flights for fleet_type, flights in fleet_stats.items()}
     return fleet_proportions
 
-from django.conf import settings  # 如果上面还没导入，补这一行
+
 
 def save_fleet_proportions_to_csv(fleet_proportions, filename="fleet_proportions.csv"):
     """将机队比例保存到项目根目录下 Predict_Datas 目录"""
@@ -156,39 +155,44 @@ def get_fleet_mapping():
 
     return mapping
 
-fleet_mapping = get_fleet_mapping()
-# print(fleet_mapping)
-# 获取前500条航线的OD
-routes = get_routes_from_csv()
+def get_miu_main(limit: int = None):
+    global fleet_mapping
+    fleet_mapping = get_fleet_mapping()
+    # print(fleet_mapping)
+    # 获取前500条航线的OD
+    routes = get_routes_from_csv(limit)
 
-# 获取前一年所有月份的列表
-one_year_ago = (datetime.datetime.now() - datetime.timedelta(days=365)).year
-year_months = [f"{one_year_ago}-{str(month).zfill(2)}" for month in range(1, 13)]
+    # 获取前一年所有月份的列表
+    one_year_ago = (datetime.datetime.now() - datetime.timedelta(days=365)).year
+    year_months = [f"{one_year_ago}-{str(month).zfill(2)}" for month in range(1, 13)]
 
-# 初始化比例计算结果
-fleet_proportions = {}
-all_records = []
-for origin, destination in routes:
-    # 获取该航线市场数据
-    records_for_fleet = get_market_data_for_route(origin, destination, year_months)
-    all_records.extend(records_for_fleet)
-    # 计算各机型的比例
-    fleet_proportions_for_route = get_fleet_proportions(records_for_fleet)
-    # 将比例结果加入总体比例数据
-    fleet_proportions[(origin, destination)] = fleet_proportions_for_route
-    # ========= 新增：汇总所有航线，算一条 all -> all =========
-
-
-# 对所有记录重新按机队分类 + 计算比例（用的还是 seats 总和来算比例）
-all_all_proportions = get_fleet_proportions(all_records)
+    # 初始化比例计算结果
+    fleet_proportions = {}
+    all_records = []
+    for origin, destination in routes:
+        # 获取该航线市场数据
+        records_for_fleet = get_market_data_for_route(origin, destination, year_months)
+        all_records.extend(records_for_fleet)
+        # 计算各机型的比例
+        fleet_proportions_for_route = get_fleet_proportions(records_for_fleet)
+        # 将比例结果加入总体比例数据
+        fleet_proportions[(origin, destination)] = fleet_proportions_for_route
+        # ========= 新增：汇总所有航线，算一条 all -> all =========
 
 
+    # 对所有记录重新按机队分类 + 计算比例（用的还是 seats 总和来算比例）
+    all_all_proportions = get_fleet_proportions(all_records)
 
-# print(fleet_proportions)
-# 把 all→all 这一行加进结果里（最后插入，CSV 里就会在最后一行）
-fleet_proportions[("ALL", "ALL")] = all_all_proportions
-# ==========================================================
-# 保存结果到 CSV 文件
-save_fleet_proportions_to_csv(fleet_proportions)
 
-print("数据已保存到 fleet_proportions.csv")
+
+    # print(fleet_proportions)
+    # 把 all→all 这一行加进结果里（最后插入，CSV 里就会在最后一行）
+    fleet_proportions[("ALL", "ALL")] = all_all_proportions
+    # ==========================================================
+    # 保存结果到 CSV 文件
+    save_fleet_proportions_to_csv(fleet_proportions)
+
+    print("数据已保存到 fleet_proportions.csv")
+
+if __name__ == "__main__":
+    get_miu_main()
