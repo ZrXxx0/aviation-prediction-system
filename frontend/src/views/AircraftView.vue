@@ -188,8 +188,12 @@
 </template>
 
 <script setup>
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
 import * as echarts from 'echarts'
+import axios from 'axios'
+import apiConfig from '@/config/api.js'
+import { ElMessage } from 'element-plus'
+import * as XLSX from 'xlsx'
 
 // 响应式状态
 const years = ref(2025)
@@ -274,15 +278,13 @@ const mockForecastData = {
   }
 }
 
-// 获取生产率配置
 const fetchProductivityConfig = async () => {
   loadingProductivity.value = true
   try {
-    const res = await fetch('你的接口URL')
-    const json = await res.json()
-    if (json.success && Array.isArray(json.data)) {
-      // 接口字段 fleet_type 改为 machineType，avg_uti 改为 flightHours 方便绑定
-      productivityData.value = json.data.map(item => ({
+    const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.URATE)
+    const res = await axios.get(url)
+    if (res.data?.success) {
+      productivityData.value = res.data.data.map(item => ({
         machineType: item.fleet_type,
         avgSeats: item.avg_seats,
         avgSpeed: item.avg_speed,

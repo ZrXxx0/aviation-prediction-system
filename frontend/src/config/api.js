@@ -38,6 +38,9 @@ const API_ENDPOINTS = {
   },
   // 预测相关API
   PREDICT: {
+    AIRCRAFTS: '/predict/forecast/get_fleet/',
+    URATE: '/predict/forecast/fleet_list_view/',
+    URATE_UPDATE: '/predict/forecast/fleet_param_update/',
     UPDATE: '/predict/forecast/update_ask/',
     UPDATE_ALL: '/predict/forecast/update_topn/',
     LOGS: '/predict/forecast/update_topn_logs/',
