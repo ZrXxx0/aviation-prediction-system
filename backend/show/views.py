@@ -2,6 +2,7 @@ from django.shortcuts import render
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status
+from collections import OrderedDict
 from .models import RouteMonthlyStat, AirportInfo
 from .serializers import  RouteMonthlyStatSerializer
 from django.db.models import Sum, Q, Count
@@ -9,7 +10,7 @@ from django.core.exceptions import ObjectDoesNotExist
 import os
 import json
 from collections import defaultdict
-from predict.models import FlightMarketRecord
+from predict.models import FlightMarketRecord, FleetParam
 
 # 公共：根据 IATA 三字码构建映射信息（从数据库获取）
 def build_info(iata_code):
@@ -537,6 +538,19 @@ def statistics_trend_view(request):
     return Response(result)
 
 
+# 获取机型数据表
+def get_fleet_params_ordered():
+    """
+    从 FleetParam 表中获取所有机队，按 avg_seats 递增排序
+    返回：OrderedDict[fleet_type] = avg_seats
+    """
+    qs = (FleetParam.objects
+          .all()
+          .order_by("avg_seats")
+          .values_list("fleet_type", "avg_seats"))
+
+    # [("大型涡扇支线客机", 76), ("小型窄体客机", 117), ...]
+    return OrderedDict(qs)
 # 机型数据统计接口
 @api_view(['GET'])
 def aircraft_data_view(request):
@@ -648,15 +662,8 @@ def aircraft_data_view(request):
     equipment_distribution.sort(key=lambda x: x['flights'], reverse=True)
 
     # 2. 机队分布统计（基于平均座位数）
-    fleet_mapping = {
-        "大型涡扇支线客机": 76,
-        "小型窄体客机": 117,
-        "中型窄体客机": 155,
-        "大型窄体客机": 180,
-        "小型宽体客机": 280,
-        "中型宽体客机": 334,
-        "大型宽体客机": 412
-    }
+    fleet_mapping = get_fleet_params_ordered()
+    # print(fleet_mapping)
 
     # 重新查询数据用于机队统计
     records_for_fleet = FlightMarketRecord.objects.filter(**filters).values(
