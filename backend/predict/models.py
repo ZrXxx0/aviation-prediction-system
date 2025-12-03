@@ -313,3 +313,44 @@ class ForecastUpdateLog(models.Model):
 
 
 
+class FleetParam(models.Model):
+    """
+    机型参数表：
+    """
+
+    # 机型名作为主键，例如 “大型涡扇支线客机”
+    fleet_type = models.CharField(
+        "机型", max_length=50, primary_key=True
+    )
+
+    avg_seats = models.DecimalField(
+        "平均座位数(座)",  # verbose_name
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+
+    avg_speed = models.DecimalField(
+        "平均速度(km/h)",
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+
+    avg_uti = models.DecimalField(
+        "平均日利用率",
+        max_digits=8,
+        decimal_places=4,
+        null=True,
+        blank=True,
+    )
+
+    class Meta:
+        verbose_name = "机型参数"
+        verbose_name_plural = "机型参数"
+
+    def __str__(self):
+        return self.fleet_type
+
