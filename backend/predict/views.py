@@ -2333,7 +2333,7 @@ def forecast_panels_view(request):
 
         # 生成时间轴
         forecast_dates, time_labels = build_periods(gran, start_year, steps)
-
+        # print(panel_types)
         # 选择对应模型
         model_map = {
             "monthly": ForecastMonthly,
@@ -2348,7 +2348,7 @@ def forecast_panels_view(request):
         for p in panel_types:
             if p == "small":
                 # 小运力：直接用数据库中的汇总航线 other-other
-                routes = [("Other", "Other")]
+                routes = [("OTHER", "OTHER")]
             else:
                 # large / medium 还是按 csv 来
                 routes = get_routes_from_csv(p)
@@ -2356,7 +2356,7 @@ def forecast_panels_view(request):
             panel_routes[p] = routes
             all_routes.update(routes)
             # print(all_routes)
-
+        # print(all_routes)
         # 如果一个航线都没有，就直接返回空结构
         if not all_routes:
             return JsonResponse(
@@ -2424,7 +2424,7 @@ def forecast_panels_view(request):
                 "headers": headers,
                 "rows": rows,
             }
-
+        # print(panels_data)
         return JsonResponse(
             {
                 "success": True,
