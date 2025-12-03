@@ -1,8 +1,9 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import DashboardView from '@/views/DashboardView.vue'
-import ForecastRunView from '@/views/ForecastRunView.vue'
 import DataShowView from '@/views/DataShowView.vue'
+import AircraftView from '@/views/AircraftView.vue'
+import ForecastRunView from '@/views/ForecastRunView.vue'
 import ModelTrainView from '@/views/ModelTrainView.vue'
 import ManagementView from '@/views/ManagementView.vue'
 import AdministrationView from '@/views/AdministrationView.vue'
@@ -31,6 +32,12 @@ const routes = [
         path: '/forecast',
         name: 'Forecast',
         redirect: '/forecast/show',
+        meta: { requiresAuth: true, requiresPermission: 'view_forecast' }
+    },
+    {
+        path: '/forecast/aircraft',
+        name: 'Aircraft',
+        component: AircraftView,
         meta: { requiresAuth: true, requiresPermission: 'view_forecast' }
     },
     {

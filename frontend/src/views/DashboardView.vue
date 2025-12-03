@@ -805,7 +805,7 @@ const renderMap = () => {
       zoom: 1.2,
       label: {emphasis: {show: false}},
       roam: true,
-      itemStyle: {normal: {areaColor: 'rgb(37,62,166)', borderColor: '#ece8e8'}, emphasis: {areaColor: '#2a333d'}}
+      itemStyle: {normal: {areaColor: 'rgba(58,74,108,100)', borderColor: '#ece8e8'}, emphasis: {areaColor: 'rgba(30, 60, 120, 0.7)'}}
       //地图颜色
       // itemStyle: {normal: {areaColor: '#2a333d', borderColor: '#ece8e8'}, emphasis: {areaColor: '#1067b3'}}
     },
@@ -834,7 +834,7 @@ const renderMap = () => {
         coordinateSystem: 'geo',
         zlevel: 1,
         effect: {show: true, period: 4, trailLength: 0.02, symbol: 'arrow', symbolSize: 5},
-        lineStyle: {normal: {color: 'rgba(255,238,169,0.73)', width: 1, opacity: 0.6, curveness: 0.2}},
+        lineStyle: {normal: {color: 'rgba(255,220,96,100)', width: 1, opacity: 0.6, curveness: 0.2}},
         data: convertData(filteredDatas)
       }]
   };

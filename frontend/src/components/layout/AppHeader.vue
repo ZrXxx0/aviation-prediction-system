@@ -18,7 +18,8 @@
         <template #title>
           <span>数据预测</span>
         </template>
-        <el-menu-item index="/forecast/show">预测结果</el-menu-item>
+        <el-menu-item index="/forecast/aircraft">机队预测</el-menu-item>
+        <el-menu-item index="/forecast/show">运力预测</el-menu-item>
         <el-menu-item index="/forecast/run">运行预测</el-menu-item>
         <el-menu-item index="/forecast/train">模型训练</el-menu-item>
       </el-sub-menu>
