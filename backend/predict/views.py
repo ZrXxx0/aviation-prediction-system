@@ -14,6 +14,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from typing import Optional
 import copy
+from decimal import Decimal
 from collections import OrderedDict
 from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord, ForecastUpdateLog,ForecastMonthly, ForecastQuarterly, ForecastYearly, FleetParam
 from show.models import AirportInfo
@@ -2767,3 +2768,125 @@ def fleet_forecast_view(request):
             },
             status=500,
         )
+
+@api_view(['GET'])
+def fleet_param_list_view(request):
+    """
+    GET /api/fleet-params/
+
+    返回所有 FleetParam 记录：
+    {
+      "success": true,
+      "data": [
+        {
+          "fleet_type": "大型涡扇支线客机",
+          "avg_seats": 76.0,
+          "avg_speed": 586.0,
+          "avg_uti": 8.8
+        },
+        ...
+      ]
+    }
+    """
+    objs = FleetParam.objects.all().order_by("avg_seats")
+
+    data = []
+    for obj in objs:
+        data.append({
+            "fleet_type": obj.fleet_type,
+            "avg_seats": float(obj.avg_seats) if obj.avg_seats is not None else None,
+            "avg_speed": float(obj.avg_speed) if obj.avg_speed is not None else None,
+            "avg_uti": float(obj.avg_uti)     if obj.avg_uti   is not None else None,
+        })
+
+    return JsonResponse({"success": True, "data": data})
+
+@api_view(['POST'])
+@csrf_exempt
+def fleet_param_update_view(request):
+    """
+    POST /api/fleet-params/
+
+    请求体示例：
+    {
+      "data": [
+        {
+          "fleet_type": "大型涡扇支线客机",
+          "avg_seats": 76.0,
+          "avg_speed": 586.0,
+          "avg_uti": 8.8
+        },
+        ...
+      ]
+    }
+
+    逻辑：
+      - 把现有 FleetParam 全部清空
+      - 用 data 里这批数据重新写入
+    """
+    # 1. 解析 JSON
+    try:
+        body = request.body.decode("utf-8") or "{}"
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return JsonResponse(
+            {"success": False, "error": "请求体不是合法 JSON"},
+            status=400,
+        )
+
+    items = payload.get("data")
+    # 兼容前端直接传数组的情况：直接把整个 payload 当作 list
+    if items is None and isinstance(payload, list):
+        items = payload
+
+    if not isinstance(items, list):
+        return JsonResponse(
+            {"success": False, "error": "data 字段必须是列表"},
+            status=400,
+        )
+
+    objs = []
+    for idx, item in enumerate(items):
+        fleet_type = item.get("fleet_type")
+        if not fleet_type:
+            return JsonResponse(
+                {"success": False, "error": f"第 {idx} 条记录缺少 fleet_type"},
+                status=400,
+            )
+
+        avg_seats = item.get("avg_seats")
+        avg_speed = item.get("avg_speed")
+        avg_uti = item.get("avg_uti")
+
+        obj = FleetParam(
+            fleet_type=fleet_type,
+            avg_seats=Decimal(str(avg_seats)) if avg_seats is not None else None,
+            avg_speed=Decimal(str(avg_speed)) if avg_speed is not None else None,
+            avg_uti=Decimal(str(avg_uti)) if avg_uti is not None else None,
+        )
+        objs.append(obj)
+
+    # 2. 覆盖写入
+    with transaction.atomic():
+        FleetParam.objects.all().delete()
+        FleetParam.objects.bulk_create(objs)
+
+    # 3. 返回刚写入的数据（方便前端确认）
+    resp_data = [
+        {
+            "fleet_type": o.fleet_type,
+            "avg_seats": float(o.avg_seats) if o.avg_seats is not None else None,
+            "avg_speed": float(o.avg_speed) if o.avg_speed is not None else None,
+            "avg_uti": float(o.avg_uti) if o.avg_uti is not None else None,
+        }
+        for o in objs
+    ]
+
+    return JsonResponse(
+        {
+            "success": True,
+            "count": len(objs),
+            "data": resp_data,
+        }
+    )
+

@@ -34,5 +34,8 @@ urlpatterns = [
     path("forecast/show/", views.forecast_panels_view, name="forecast_panels"),
     path("forecast/update_topn_logs/", views.get_forecast_update_logs, name="get_forecast_update_logs"),
     path("forecast/get_fleet/", views.fleet_forecast_view, name="fleet_forecast_view"),
+    path("forecast/fleet_list_view/", views.fleet_param_list_view, name="fleet_param_list_view"),
+    path("forecast/fleet_param_update/", views.fleet_param_update_view, name="fleet_param_update_view"),
+
 
 ]
