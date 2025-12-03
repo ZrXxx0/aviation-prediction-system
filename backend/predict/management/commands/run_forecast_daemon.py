@@ -5,6 +5,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 from django.core.management import call_command
 from predict.models import ForecastUpdateLog
+from predict.predictive_algorithm.get_miu import get_miu_main
 
 # 配置最大重试次数（1次重试 = 总共运行2次）
 MAX_RETRIES = 1
@@ -45,6 +46,12 @@ class Command(BaseCommand):
             default=None,
             help='覆盖配置: 并行进程数'
         )
+        parser.add_argument(
+            '--lr_ratio',
+            type=float,
+            default=None,
+            help='覆盖配置：趋势预测占比'
+        )
 
     def handle(self, *args, **options):
         # 2. 获取启动参数并保存到实例变量中
@@ -53,6 +60,7 @@ class Command(BaseCommand):
         self.time_granularity = options['time_granularity']
         self.future_periods = options['future_periods']
         self.max_workers = options['max_workers']
+        self.lr_ratio = options['lr_ratio']
 
         # 生成配置描述字符串，用于日志显示
         config_desc = [f"Top {self.top_n}"]
@@ -75,19 +83,18 @@ class Command(BaseCommand):
             time.sleep(10)
 
     def check_and_run(self):
-        last_task = ForecastUpdateLog.objects.first()
+        # 1. 优先处理：队列中等待的任务 (Status=0)
+        # 按 ID 正序排列，保证先提交的先执行
+        task_to_run = ForecastUpdateLog.objects.filter(status=0).order_by('id').first()
 
-        if not last_task:
+        if task_to_run:
+            self.execute_task(task_to_run)
             return
 
-        if last_task.status == 0:
-            self.execute_task(last_task)
-
-        elif last_task.status == 1:
-            # 运行中，暂时跳过
-            pass
-
-        elif last_task.status == 3:
+        # 2. 次要检查：检查最近的一个任务是否失败且需要重试
+        # 注意：这里需要防止重复创建重试任务，你原本的 handle_retry_logic 里已有防重检查
+        last_task = ForecastUpdateLog.objects.last()
+        if last_task and last_task.status == 3:
             self.handle_retry_logic(last_task)
 
     def execute_task(self, task):
@@ -120,17 +127,43 @@ class Command(BaseCommand):
                 cmd_kwargs['future_periods'] = self.future_periods
             if self.max_workers:
                 cmd_kwargs['max_workers'] = self.max_workers
+            if self.lr_ratio:
+                cmd_kwargs['lr_ratio'] = self.lr_ratio
 
             # 调用子命令
             call_command('update_forecasts', **cmd_kwargs)
 
-            # 2. 标记成功
+            self.stdout.write("主预测任务完成，开始更新机队比例(MIU)...")
+            out_buffer.write("\n\n=== Starting MIU (Fleet Proportion) Update ===\n")
+
+            try:
+                if get_miu_main:
+                    # 执行逻辑
+                    get_miu_main()
+                    msg = "MIU Update: Success"
+                    self.stdout.write(self.style.SUCCESS(msg))
+                    out_buffer.write(f"{msg}\n")
+                else:
+                    msg = "MIU Update: Skipped (Module not found)"
+                    self.stdout.write(self.style.WARNING(msg))
+                    out_buffer.write(f"{msg}\n")
+
+            except Exception as miu_e:
+                # 捕获 MIU 的错误，但不影响主任务状态
+                miu_trace = traceback.format_exc()
+                msg = f"MIU Update: Failed. Error: {str(miu_e)}"
+                self.stdout.write(self.style.ERROR(msg))
+                out_buffer.write(f"{msg}\nTraceback:\n{miu_trace}\n")
+
+            out_buffer.write("=== MIU Update Logic Finished ===\n")
+
+            # 2. 标记成功 (即使 MIU 失败，主预测只要成功就算任务成功)
             task.status = 2
             task.end_time = timezone.now()
             # 记录详细日志
             task.log_message = f"[Config: {self.config_str}]\n" + out_buffer.getvalue()
             task.save()
-            self.stdout.write(self.style.SUCCESS(f"任务 (ID: {task.id}) 执行成功"))
+            self.stdout.write(self.style.SUCCESS(f"任务 (ID: {task.id}) 全部流程执行成功"))
 
         except Exception as e:
             # 3. 标记失败
@@ -146,6 +179,7 @@ class Command(BaseCommand):
         finally:
             out_buffer.close()
             err_buffer.close()
+
 
     def handle_retry_logic(self, failed_task):
         """

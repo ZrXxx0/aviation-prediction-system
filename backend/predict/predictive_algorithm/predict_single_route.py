@@ -3,6 +3,7 @@ import pickle
 import json
 import pandas as pd
 import numpy as np
+from sklearn.linear_model import LinearRegression
 
 from predict.models import RouteModelInfo
 
@@ -46,6 +47,7 @@ def predict_single_route(prediction_request):
     time_granularity = prediction_request['time_granularity']
     prediction_periods = prediction_request['prediction_periods']
     model_id = prediction_request['model_id']
+    max_lr_rate = float(prediction_request.get('max_lr_rate', 0.2))
 
     # 从数据库获取模型信息
     try:
@@ -128,12 +130,38 @@ def predict_single_route(prediction_request):
         adjusted_periods = prediction_periods
 
     # 调整最后完整日期到对应的时间粒度
+    print(last_complete_date)
     if time_granularity == 'quarterly':
         while last_complete_date.month not in [1, 4, 7, 10]:
             last_complete_date -= pd.DateOffset(months=1)
     elif time_granularity == 'yearly':
         while last_complete_date.month != 1:
             last_complete_date -= pd.DateOffset(months=1)
+
+    trend_model = None
+    has_trend_model = False
+
+    # 只有当 max_lr_rate > 0 时才尝试训练趋势模型，节省性能
+    if max_lr_rate > 0:
+        # 过滤掉目标值为空的数据用于训练趋势
+        trend_train_data = latest_data.dropna(subset=[target_col])
+
+        if len(trend_train_data) >= 12:
+            try:
+                # 使用时间戳的 ordinal 作为特征
+                X_trend = trend_train_data[date_col].map(pd.Timestamp.toordinal).values.reshape(-1, 1)
+                y_trend = trend_train_data[target_col].values
+
+                trend_model = LinearRegression()
+                trend_model.fit(X_trend, y_trend)
+                has_trend_model = True
+                print(f"[{origin_airport}-{destination_airport}] 已训练历史趋势模型 (样本数: {len(trend_train_data)})")
+            except Exception as e:
+                print(f"[{origin_airport}-{destination_airport}] 趋势模型训练失败: {e}")
+        else:
+            print(f"[{origin_airport}-{destination_airport}] 历史数据不足 ({len(trend_train_data)}条)，跳过趋势修正")
+    else:
+        print(f"[{origin_airport}-{destination_airport}] max_lr_rate 为 0，跳过趋势修正")
 
     # 执行预测
     future_preds = []
@@ -163,18 +191,45 @@ def predict_single_route(prediction_request):
 
         # 预测
         latest_input = current_data.iloc[[-1]][feature_cols]
-        # print(latest_input["O_GDP"])
-        # print(latest_input["D_GDP"])
-        # print(prediction_request.get('economic_tail_method'))
-        # print(prediction_request.get('economic_growth_rate'))
-        next_pred = model.predict(latest_input)[0]
+        # 1. 机器学习模型预测 (ML Prediction)
+        ml_pred = model.predict(latest_input)[0]
 
-        # 更新数据
-        current_data.loc[current_data.index[-1], target_col] = next_pred
+        # 2. 融合逻辑
+        final_pred = ml_pred
+
+        if has_trend_model and max_lr_rate > 0:
+            try:
+                # 计算趋势预测 (Trend Prediction)
+                next_date_ordinal = np.array([[next_date.toordinal()]])
+                trend_pred = trend_model.predict(next_date_ordinal)[0]
+
+                # 计算动态权重 (Dynamic Weighting)
+                # 策略: i=0 (近期) -> weight_trend 接近 0; 越往后 weight_trend 越接近 max_lr_rate
+                # 防止除以0
+                denominator = adjusted_periods if adjusted_periods > 0 else 1
+                weight_trend = (i / denominator) * max_lr_rate
+                weight_ml = 1.0 - weight_trend
+
+                # 执行加权融合
+                final_pred = (ml_pred * weight_ml) + (trend_pred * weight_trend)
+                # debug 打印 (可选)
+                # print(f"Date: {next_date.date()}, ML: {ml_pred:.0f}, Trend: {trend_pred:.0f}, W_Trend: {weight_trend:.2f}, Final: {final_pred:.0f}")
+
+            except Exception as e:
+                print(f"趋势预测计算出错，回退到纯ML预测: {e}")
+                final_pred = ml_pred
+
+        # 确保非负
+        final_pred = max(0, final_pred)
+
+        # ---------------------------------------------------------------------
+        # 关键步骤：更新数据，使下一轮特征生成基于融合后的结果
+        # ---------------------------------------------------------------------
+        current_data.loc[current_data.index[-1], target_col] = final_pred
 
         future_preds.append({
             'YearMonth': next_date,
-            'Predicted': next_pred
+            'Predicted': final_pred
         })
 
         last_complete_date = next_date

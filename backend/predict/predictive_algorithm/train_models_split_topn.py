@@ -5,6 +5,12 @@ os.environ["OPENBLAS_NUM_THREADS"] = "1"
 os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
 os.environ["NUMEXPR_NUM_THREADS"] = "1"
 import pandas as pd
+import time
+import random
+from sklearn.linear_model import LinearRegression
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from statsmodels.tsa.arima.model import ARIMA
 from .time_granularity import TimeGranularityController
@@ -29,18 +35,19 @@ ROUTE_DATA_REPORT_PATH = os.path.join(base_dir,'route_ranking.csv')
 BASE_SAVE_DIR = base_dir
 # 全局参数配置
 CONFIG = {
-    "test_size": 6,  # 测试集大小
+    "test_size": 4,  # 测试集大小
     "time_granularity": "monthly",  # 时间粒度
     "add_ts_forecast": True,  # 是否添加时间序列特征
-    "future_periods": 12*20,  # 预测时长
-    "max_workers": 8,  # 并行处理的最大进程数
+    "future_periods": 20*12,  # 预测时长
+    "max_workers": 18,  # 并行处理的最大进程数
     "model_type": "lgb",  # 'lgb' 或 'xgb'
     "plot_results": False,  # 是否生成结果图表
     "save_data": False,  # 是否保存中间数据
     "filter_mode": "top_n",  # 筛选方式: 'threshold'（阈值筛选）或 'top_n'（前n条筛选）
     "min_valid_ratio": None,  # 最小有效比例阈值（filter_mode='threshold'时使用）
     "top_n": 500,  # 前n条航线数量（filter_mode='top_n'时使用）
-    "include_other": True  # 是否处理剩余航线作为"其他"航线
+    "include_other": True,  # 是否处理剩余航线作为"其他"航线
+    "max_lr_ratio":0.2
 }
 
 ##################################    核心函数   ##################################
@@ -59,6 +66,63 @@ def get_last_valid_distance(route_data):
 
     # 取最后一条记录的距离（假设近期距离最准）
     return valid_dist.iloc[-1]
+
+
+def save_route_plot(history_df, future_df, save_path, title, y_col_hist, y_col_future, ylabel):
+    """
+    绘制并保存历史与预测的对比图
+    """
+    try:
+        plt.figure(figsize=(12, 6))
+
+        # 确保时间列是 datetime 格式
+        history_dates = pd.to_datetime(history_df['YearMonth'])
+        future_dates = pd.to_datetime(future_df['YearMonth'])
+
+        # 绘制历史数据
+        plt.plot(history_dates, history_df[y_col_hist], label='Historical Data', color='#1f77b4', linewidth=2)
+
+        # 绘制预测数据
+        plt.plot(future_dates, future_df[y_col_future], label='Forecast', color='#d62728', linestyle='--', linewidth=2)
+
+        plt.title(title, fontsize=14)
+        plt.xlabel('Date', fontsize=12)
+        plt.ylabel(ylabel, fontsize=12)
+        plt.legend()
+        plt.grid(True, linestyle=':', alpha=0.6)
+
+        # 优化X轴日期显示
+        plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        plt.gcf().autofmt_xdate()  # 自动旋转日期标签
+
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+    except Exception as e:
+        print(f"绘图失败: {e}")
+        plt.close()
+
+
+def ensure_dir_robust(dir_path, max_retries=5):
+    if os.path.exists(dir_path):
+        return True
+
+    for i in range(max_retries):
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+            if os.path.exists(dir_path):
+                return True
+            time.sleep(0.01 * (i + 1))  # 极短的退避等待
+        except OSError:
+            time.sleep(0.05 + random.random() * 0.05)  # 随机等待防止再次碰撞
+
+    # 最后尝试一次，如果还不行则报错
+    if not os.path.exists(dir_path):
+        try:
+            os.makedirs(dir_path, exist_ok=True)
+        except Exception as e:
+            print(f"创建目录严重失败 {dir_path}: {e}")
+            return False
+    return True
 
 
 def process_other_routes_simple(remaining_routes, domestic, config, save_dir):
@@ -116,10 +180,27 @@ def process_other_routes_simple(remaining_routes, domestic, config, save_dir):
         # 4. ARIMA 预测
         print(f"拟合 ARIMA 模型，历史数据点数: {len(ts_data)}")
 
+        # 1. 训练线性趋势模型
+        ts_pre = ts_data.copy()
+
+        trend_model = None
+        has_trend = False
+
+        if len(ts_pre) >= 12:  # 至少有一年数据才拟合趋势
+            X_trend = np.array([t.toordinal() for t in ts_pre.index]).reshape(-1, 1)
+            y_trend = ts_pre.values
+
+            trend_model = LinearRegression()
+            trend_model.fit(X_trend, y_trend)
+            has_trend = True
+            print(f"√ 成功拟合历史长期趋势 (R2: {trend_model.score(X_trend, y_trend):.4f})")
+        else:
+            print("! 历史数据不足，仅使用 ARIMA")
+
         # 简单的 ARIMA 参数，对于这种聚合趋势通常 (1,1,1) 或 (5,1,0) 即可
         # 这里使用 (1,1,0) 加 季节性 或简单自回归，为了稳健使用 (1,1,1)
-        model = ARIMA(ts_data, order=(1, 1, 1))
-        model_fit = model.fit()
+        arima_model = ARIMA(ts_data, order=(1, 1, 1))
+        arima_fit = arima_model.fit()
 
         # 计算预测步长
         future_periods = config["future_periods"]
@@ -128,13 +209,55 @@ def process_other_routes_simple(remaining_routes, domestic, config, save_dir):
         elif granularity == 'yearly':
             future_periods = future_periods // 12
 
-        # 预测
-        forecast = model_fit.forecast(steps=future_periods)
+        # 生成日期索引
+        last_date = ts_data.index[-1]
+        future_dates = []
+        current_date = last_date
+
+        for _ in range(future_periods):
+            if granularity == 'monthly':
+                current_date += pd.DateOffset(months=1)
+            elif granularity == 'quarterly':
+                current_date += pd.DateOffset(months=3)
+            else:
+                current_date += pd.DateOffset(years=1)
+            future_dates.append(current_date)
+
+        future_dates = pd.DatetimeIndex(future_dates)
+
+        # 1. 获取 ARIMA 预测值
+        arima_forecast = arima_fit.forecast(steps=future_periods)
+
+        # 2. 计算融合预测值
+        final_preds = []
+
+        for i, date in enumerate(future_dates):
+            # ARIMA 分量
+            pred_arima = arima_forecast.iloc[i]
+
+            final_val = pred_arima
+
+            if has_trend:
+                # 线性趋势 分量
+                pred_trend = trend_model.predict([[date.toordinal()]])[0]
+
+                # 动态权重计算 (Glide Path)
+                # i=0 (近期) -> weight_trend = 0
+                # i=end (远期) -> weight_trend = MAX_TREND_WEIGHT
+                max_trend_weight = config['max_lr_ratio']
+                weight_trend = (i / future_periods) * max_trend_weight
+                weight_arima = 1.0 - weight_trend
+
+                # 融合
+                final_val = (pred_arima * weight_arima) + (pred_trend * weight_trend)
+
+            # 确保不小于0
+            final_preds.append(max(0, final_val))
 
         # 5. 格式化输出
         future_df = pd.DataFrame({
-            'YearMonth': forecast.index,
-            'Predicted_ASK': forecast.values
+            'YearMonth': future_dates,
+            'Predicted_ASK': final_preds
         })
 
         # 因为是对 ASK 直接建模，Route_Total_Seats 设为 NaN 或者 0 (因为没有单一的距离可以反推)
@@ -142,6 +265,26 @@ def process_other_routes_simple(remaining_routes, domestic, config, save_dir):
         future_df['Distance'] = 0  # 混合距离无意义
 
         future_df.to_csv(os.path.join(route_dir, "future_predictions.csv"), index=False, encoding='utf-8-sig')
+
+        history_df_for_plot = ts_data.reset_index()
+        history_df_for_plot.columns = ['YearMonth', 'ASK']
+
+        plot_path = os.path.join(route_dir, "forecast_plot.png")
+        save_route_plot(
+            history_df=history_df_for_plot,
+            future_df=future_df,
+            save_path=plot_path,
+            title="Other-Other Routes Aggregated Forecast (ASK)",
+            y_col_hist='ASK',
+            y_col_future='Predicted_ASK',
+            ylabel='Total ASK'
+        )
+
+        history_df_for_plot['Actual_Seats'] = 0
+        history_df_for_plot['Distance'] = 0
+        history_df_for_plot.rename(columns={'ASK': 'Actual_Seats'}, inplace=True)
+        history_save_path = os.path.join(route_dir, "history_data.csv")
+        history_df_for_plot.to_csv(history_save_path, index=False, encoding='utf-8-sig')
 
         print(f"√ 剩余航线聚合预测完成，已保存至 {route_dir}")
 
@@ -260,7 +403,26 @@ def process_single_route(route, domestic, config):
         if hasattr(model_full, 'set_params'):
             model_full.set_params(n_jobs=1, verbose=-1)
         model_full.fit(X_full, y_full)
+
+        trend_model = None
+        has_trend_model = False
+        trend_data = data_with_features_full.copy()
         
+        # 2. 只有当历史数据足够长(例如至少12个点)才训练趋势模型，否则只用机器学习模型
+        if len(trend_data) >= 12:
+            try:
+                # 使用时间戳的 ordinal 作为特征 (简单的线性时间趋势 y = kt + b)
+                X_trend = trend_data[route_processor.date_col].map(pd.Timestamp.toordinal).values.reshape(-1, 1)
+                y_trend = trend_data['Route_Total_Seats'].values
+
+                trend_model = LinearRegression()
+                trend_model.fit(X_trend, y_trend)
+                has_trend_model = True
+                print(f"  -> 已训练历史趋势模型 (样本数: {len(trend_data)})")
+            except Exception as e:
+                print(f"  -> 趋势模型训练失败: {e}")
+        else:
+            print(f"  ->历史数据不足 ({len(trend_data)}条)，跳过趋势修正")
         # 未来预测
         feature_cols = X_train.columns.tolist()
         date_col = route_processor.date_col
@@ -286,6 +448,14 @@ def process_single_route(route, domestic, config):
         future_preds = []
         raw_route_data = route_processor.get_route_data(origin, destination)
         ref_distance = get_last_valid_distance(raw_route_data)
+        history_df = data_with_features_full[['YearMonth', 'Route_Total_Seats']].copy()
+        history_df.rename(columns={'Route_Total_Seats': 'Actual_Seats'}, inplace=True)
+
+        history_df['Distance'] = ref_distance
+        history_df['Actual_ASK'] = history_df['Actual_Seats'] * ref_distance
+        history_save_path = os.path.join(route_dir, "history_data.csv")
+        history_df.to_csv(history_save_path, index=False, encoding='utf-8-sig')
+
         for i in range(future_periods):
             # 日期增量
             if config["time_granularity"] == 'monthly':
@@ -301,9 +471,37 @@ def process_single_route(route, domestic, config):
             latest_data = route_processor.preprocessor.fit_transform(latest_data)
             latest_data = route_processor.feature_builder.fit_transform(latest_data)
             latest_input = latest_data.iloc[[-1]][feature_cols]
-            next_pred = model_full.predict(latest_input)[0]
-            next_pred_seats = max(0, next_pred)
-            latest_data.loc[latest_data.index[-1], 'Route_Total_Seats'] = next_pred
+
+            # 1. 机器学习模型预测 (ML Prediction)
+            ml_pred = model_full.predict(latest_input)[0]
+
+            # 2. 融合逻辑
+            final_pred = ml_pred
+            if has_trend_model:
+                # 计算趋势预测 (Trend Prediction)
+                next_date_ordinal = np.array([[next_date.toordinal()]])
+                trend_pred = trend_model.predict(next_date_ordinal)[0]
+
+                # 计算动态权重 (Dynamic Weighting)
+                # 策略:
+                # i=0 (近期) -> weight_trend 接近 0, 主要靠 ML 模型
+                # i=future_periods (远期) -> weight_trend 接近 0.8 或 1.0, 主要靠趋势
+
+                max_trend_weight = config['max_lr_ratio']
+
+                # 线性增长权重: 从 0 增长到 max_trend_weight
+                weight_trend = (i / future_periods) * max_trend_weight
+                weight_ml = 1.0 - weight_trend
+
+                # 融合
+                final_pred = (ml_pred * weight_ml) + (trend_pred * weight_trend)
+
+            # 确保非负
+            next_pred_seats = max(0, final_pred)
+
+            # 将融合后的预测值填回 latest_data，这样下一轮的 lag 特征会基于融合后的结果
+            latest_data.loc[latest_data.index[-1], 'Route_Total_Seats'] = next_pred_seats
+
             pred_ask = next_pred_seats * ref_distance
 
             future_preds.append({
@@ -317,8 +515,20 @@ def process_single_route(route, domestic, config):
         # 创建未来预测DataFrame
         future_predictions_df = pd.DataFrame(future_preds)
         if not future_predictions_df.empty:
-            future_predictions_df.to_csv(os.path.join(route_dir, "future_predictions.csv"), index=False, encoding='utf-8-sig')
-        
+            # os.makedirs(route_dir, exist_ok=True)
+            future_predictions_df.to_csv(os.path.join(route_dir, "future_predictions.csv"), index=False,
+                                         encoding='utf-8-sig')
+            plot_path = os.path.join(route_dir, "forecast_plot.png")
+            save_route_plot(
+                history_df=data_with_features_full,
+                future_df=future_predictions_df,
+                save_path=plot_path,
+                title=f"{origin} -> {destination} Forecast (Seats)",
+                y_col_hist='Route_Total_Seats',
+                y_col_future='Predicted_Seats',
+                ylabel='Seats'
+            )
+
         print(f"√ 航线 {origin}-{destination} 处理完成")
         return True
     
@@ -362,7 +572,7 @@ def process_all_routes(domestic, config):
     # 创建保存目录
     base_dir = os.path.join(BASE_SAVE_DIR, f"{config['time_granularity']}_{config['model_type']}")
     config["base_save_dir"] = base_dir
-    os.makedirs(base_dir, exist_ok=True)
+    ensure_dir_robust(base_dir)
 
     # 保存配置和列表
     valid_routes.to_csv(os.path.join(base_dir, "valid_routes.csv"), index=False)
@@ -372,18 +582,11 @@ def process_all_routes(domestic, config):
     print("\n>>> 阶段 1: 处理 Top N 主要航线 <<<")
 
     success_count = 0
-    skipped_count = 0
 
     with ProcessPoolExecutor(max_workers=config["max_workers"]) as executor:
         futures = {}
         for route in routes_list:
             origin, destination = route
-
-            # 检查断点续传
-            route_dir = os.path.join(base_dir, f"{origin}_{destination}")
-            if os.path.exists(os.path.join(route_dir, "future_predictions.csv")):
-                skipped_count += 1
-                continue
 
             # 提取数据
             mask = (domestic['Origin'] == origin) & (domestic['Destination'] == destination)
@@ -391,7 +594,7 @@ def process_all_routes(domestic, config):
 
             futures[executor.submit(process_single_route, route, route_data, config)] = route
 
-        print(f"提交任务: {len(futures)} (跳过: {skipped_count})")
+        print(f"提交任务: {len(futures)} ")
 
         for future in as_completed(futures):
             try:

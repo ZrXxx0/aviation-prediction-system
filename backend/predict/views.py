@@ -569,6 +569,14 @@ def forecast_route_view(request):
         for i, pred in enumerate(predictions):
             try:
                 hierarchy_reconcile = int(pred.get('hierarchy_reconcile', 0))
+                user_max_lr_rate = pred.get('max_lr_rate')
+                if user_max_lr_rate is not None:
+                    try:
+                        user_max_lr_rate = float(user_max_lr_rate)
+                        if not (0 <= user_max_lr_rate <= 1.0):
+                            return JsonResponse({'error': f'任务 {i}: max_lr_rate 必须为在0-1之间'}, status=400)
+                    except ValueError:
+                        return JsonResponse({'error': f'任务 {i}: max_lr_rate 必须为数字'}, status=400)
 
                 if hierarchy_reconcile == 0:
                     # === 非对齐预测逻辑 ===
@@ -618,6 +626,7 @@ def forecast_route_view(request):
                         # 透传经济尾部处理参数（可选）
                         'economic_tail_method': pred.get('economic_tail_method'),
                         'economic_growth_rate': pred.get('economic_growth_rate'),
+                        'max_lr_rate': user_max_lr_rate
                     }
                     quarterly_req = {
                         **base,
@@ -627,6 +636,7 @@ def forecast_route_view(request):
                         # 透传经济尾部处理参数（可选）
                         'economic_tail_method': pred.get('economic_tail_method'),
                         'economic_growth_rate': pred.get('economic_growth_rate'),
+                        'max_lr_rate': user_max_lr_rate
                     }
 
                     # 1. 执行两套模型预测

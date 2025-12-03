@@ -39,6 +39,7 @@ class Command(BaseCommand):
         parser.add_argument('--model_type', type=str, default=None, help="覆盖配置: 模型类型 (lgb/xgb)")
         parser.add_argument('--future_periods', type=int, default=None, help="覆盖配置: 预测时长")
         parser.add_argument('--max_workers', type=int, default=None, help="覆盖配置: 并行进程数")
+        parser.add_argument('--lr_ratio', type=float, default=None, help="覆盖配置：趋势预测占比")
 
     def handle(self, *args, **options):
         # 0. 获取命令行参数
@@ -63,6 +64,8 @@ class Command(BaseCommand):
             TRAIN_CONFIG['future_periods'] = options['future_periods']
         if options['max_workers']:
             TRAIN_CONFIG['max_workers'] = options['max_workers']
+        if options['lr_ratio']:
+            TRAIN_CONFIG['max_lr_ratio'] = options['lr_ratio']
 
         self.stdout.write(f"当前运行配置: {TRAIN_CONFIG}")
 
