@@ -33,4 +33,6 @@ urlpatterns = [
     path("forecast/update_ask/", views.update_forecast_ask_view, name="update_forecast_ask"),
     path("forecast/show/", views.forecast_panels_view, name="forecast_panels"),
     path("forecast/update_topn_logs/", views.get_forecast_update_logs, name="get_forecast_update_logs"),
+    path("forecast/get_fleet/", views.fleet_forecast_view, name="fleet_forecast_view"),
+
 ]

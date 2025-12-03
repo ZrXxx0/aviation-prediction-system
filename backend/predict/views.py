@@ -14,8 +14,8 @@ from django.core.exceptions import ObjectDoesNotExist
 from django.utils import timezone
 from typing import Optional
 import copy
-
-from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord, ForecastUpdateLog,ForecastMonthly, ForecastQuarterly, ForecastYearly
+from collections import OrderedDict
+from .models import RouteModelInfo, PretrainRecord, FlightMarketRecord, ForecastUpdateLog,ForecastMonthly, ForecastQuarterly, ForecastYearly, FleetParam
 from show.models import AirportInfo
 from .predictive_algorithm.pretrain_single_route import pretrain_single_route
 from .predictive_algorithm.predict_single_route import predict_single_route
@@ -2528,3 +2528,242 @@ def get_forecast_update_logs(request):
             'success': False,
             'message': f'服务器错误: {str(e)}'
         }, status=500)
+
+# 获取机型数据表
+def get_fleet_params_ordered():
+    """
+    从 FleetParam 表中获取所有机队，按 avg_seats 递增排序
+    返回：OrderedDict[fleet_type] = FleetParam 实例
+    """
+    qs = FleetParam.objects.all().order_by("avg_seats")
+
+    result = OrderedDict()
+    for fp in qs:
+        result[fp.fleet_type] = fp
+    return result
+# 获取映射μ
+FLEET_PROP_CSV = os.path.join(settings.BASE_DIR, "Predict_Datas", "fleet_proportions.csv")
+FLEET_COLS = [
+    "大型涡扇支线客机",
+    "小型窄体客机",
+    "中型窄体客机",
+    "大型窄体客机",
+    "小型宽体客机",
+    "中型宽体客机",
+    "大型宽体客机",
+]
+def load_fleet_mu_map():
+    """
+    读取 fleet_proportions.csv：
+    返回 {(origin, destination): {fleet_type: μ(0~1)}} 的 dict
+    """
+    mu_map = {}
+
+    if not os.path.exists(FLEET_PROP_CSV):
+        return mu_map
+
+    with open(FLEET_PROP_CSV, newline="", encoding="gbk") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            origin = row.get("origin")
+            dest = row.get("destination")
+            if not origin or not dest:
+                continue
+
+            key = (origin, dest)
+            inner = {}
+            for col in FLEET_COLS:
+                val = row.get(col)
+                if val in (None, "", "NaN"):
+                    continue
+                try:
+                    inner[col] = float(val)
+                except ValueError:
+                    continue
+
+            mu_map[key] = inner
+
+    return mu_map
+
+@api_view(['GET'])
+def fleet_forecast_view(request):
+    """
+    GET /api/forecast-panels/year=2024&panels=large,medium,all
+
+    参数：
+      - year: 开始年份 (int)
+      - panels: 需要返回的面板类型
+          * 支持 ?panels=large,medium
+          * 也支持 ?panels=large&panels=medium
+
+    逻辑：
+      1. 按年份从 ForecastYearly 查 ASK
+      2. 从 fleet_proportions.csv 找到对应机型的 μ
+      3. 对每条航线、每个机型计算：
+         - val_seats = ask * μ / avg_seats
+         - val_speed = ask * μ / avg_speed
+         - val_uti   = ask * μ / avg_uti
+      4. 不做跨航线的相加，直接把这些结果按 panel 返回
+    """
+    try:
+        # ------------ 1. year 参数 ------------
+        try:
+            start_year = int(request.GET.get("year", "2024"))
+        except ValueError:
+            return JsonResponse(
+                {"success": False, "error": "year 必须是整数年份"},
+                status=400,
+            )
+
+        # ------------ 2. panels 参数 ------------
+        raw_list = request.GET.getlist("panels")  # 可能是 ["large,medium,all"] 或 ["large", "medium"]
+        panel_types = []
+
+        for entry in raw_list:
+            panel_types.extend(
+                [p.strip() for p in entry.split(",") if p.strip()]
+            )
+
+        if not panel_types:
+            raw = request.GET.get("panels", "")
+            if raw:
+                panel_types = [p.strip() for p in raw.split(",") if p.strip()]
+
+        if not panel_types:
+            panel_types = ["large"]  # 默认
+
+        valid_panels = {"large", "medium", "all"}
+        panel_types = [p for p in panel_types if p in valid_panels]
+        if not panel_types:
+            return JsonResponse(
+                {"success": False, "error": "panels 必须是 large/medium/all"},
+                status=400,
+            )
+
+        # ------------ 3. 每个 panel 对应的航线列表 ------------
+        panel_routes = {}
+        all_routes = set()
+        for p in panel_types:
+            if p == "all":
+                # all 面板：只返回 ALL-ALL 这一条
+                routes = [("ALL", "ALL")]
+            else:
+                # large / medium 还是按 csv 来
+                routes = get_routes_from_csv(p)
+
+            panel_routes[p] = routes
+            all_routes.update(routes)
+
+        if not all_routes:
+            return JsonResponse(
+                {
+                    "success": False,
+                    "error": "没有航线",
+                },
+                status=400,
+            )
+
+        # ------------ 5. 按年份从 ForecastYearly 查询 ASK ------------
+        ModelCls = ForecastYearly
+
+        route_filter = Q()
+        for o, d in all_routes:
+            route_filter |= Q(origin=o, destination=d)
+
+        qs = (
+            ModelCls.objects.filter(route_filter, forecast_date__year=start_year)
+            .values("origin", "destination", "ask")
+        )
+
+        # (origin, destination) -> ask
+        ask_map = {}
+        for row in qs:
+            key = (row["origin"], row["destination"])
+            val = row["ask"]
+            ask_map[key] = float(val) if val is not None else 0.0
+
+        # ------------ 6. 最新一次成功预测时间 ------------
+        last_log = ForecastUpdateLog.objects.filter(status=2).order_by("-created_at").first()
+        if last_log:
+            forecast_time_str = last_log.created_at.isoformat()
+        else:
+            forecast_time_str = None
+
+        # ------------ 7. 读 μ（机队比例）+ 机队参数 ------------
+        mu_map = load_fleet_mu_map()          # {(o,d): {fleet_type: μ}}
+        fleet_params = get_fleet_params_ordered()  # OrderedDict[fleet_type] = FleetParam
+
+        # ------------ 8. 按 panel、按航线、按机型 计算 ask*μ/avg_xxx ------------
+        # 返回结构：panels_data[panel] = { "headers": [...], "rows": [...] }
+        panels_data = {}
+
+        # 表头：origin, destination, 每个机队一列（值为 float_num）
+        headers = ["origin", "destination"] + FLEET_COLS
+
+        for p in panel_types:
+            routes = panel_routes[p]
+            rows = []
+
+            for (o, d) in routes:
+                ask_val = ask_map.get((o, d), 0.0)
+                mu_for_route = mu_map.get((o, d), {})
+
+                # 这一行的起始：origin, destination
+                row = [o, d]
+
+                # 按 FLEET_COLS 的顺序依次算每个机队的 float_num
+                for fleet_type in FLEET_COLS:
+                    mu = mu_for_route.get(fleet_type, 0.0)
+                    fp = fleet_params.get(fleet_type)
+
+                    if (
+                            not fp
+                            or mu == 0
+                            or ask_val == 0
+                            or fp.avg_seats in (None, 0)
+                            or fp.avg_speed in (None, 0)
+                            or fp.avg_uti in (None, 0)
+                    ):
+                        float_num = 0.0
+                    else:
+                        avg_seats = float(fp.avg_seats)
+                        avg_speed = float(fp.avg_speed)
+                        avg_uti = float(fp.avg_uti)
+
+                        # 飞机数量 float_num = ask * μ / (avg_seats * avg_speed * avg_uti)
+                        float_num = int(ask_val * mu / (avg_seats * avg_speed * avg_uti*365))
+
+                    row.append(round(float_num, 6))
+
+                rows.append(row)
+
+            panels_data[p] = {
+                "headers": headers,
+                "rows": rows,
+            }
+
+        # ------------ 9. 返回 ------------
+        return JsonResponse(
+            {
+                "success": True,
+                "data": {
+                    "forecast_time": forecast_time_str,
+                    "year": start_year,
+                    "panels": panels_data,
+                },
+            }
+        )
+
+    except Exception as e:
+        # 出异常时返回 500，方便调试
+        import traceback
+
+        return JsonResponse(
+            {
+                "success": False,
+                "error": "服务器内部错误",
+                "message": str(e),
+                "traceback": traceback.format_exc(),
+            },
+            status=500,
+        )
