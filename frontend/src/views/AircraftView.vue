@@ -228,12 +228,6 @@ const updateContentTableMaxHeight = () => {
 window.addEventListener('resize', updateContentTableMaxHeight)
 
 // 模拟接口数据
-const mockProductivityConfig = [
-  { machineType: '小型窄体客机', avgSeats: 100, avgSpeed: 800, flightHours: 10 },
-  { machineType: '中型窄体客机', avgSeats: 150, avgSpeed: 850, flightHours: 9 },
-  { machineType: '大型宽体客机', avgSeats: 300, avgSpeed: 900, flightHours: 8 },
-]
-
 const mockPieChartData = [
   { value: 40, name: '大运量' },
   { value: 30, name: '中运量' },
@@ -284,10 +278,23 @@ const mockForecastData = {
 const fetchProductivityConfig = async () => {
   loadingProductivity.value = true
   try {
-    await new Promise(resolve => setTimeout(resolve, 300))
-    productivityData.value = mockProductivityConfig
-  } catch (err) {
-    console.error('获取生产率配置失败:', err)
+    const res = await fetch('你的接口URL')
+    const json = await res.json()
+    if (json.success && Array.isArray(json.data)) {
+      // 接口字段 fleet_type 改为 machineType，avg_uti 改为 flightHours 方便绑定
+      productivityData.value = json.data.map(item => ({
+        machineType: item.fleet_type,
+        avgSeats: item.avg_seats,
+        avgSpeed: item.avg_speed,
+        flightHours: item.avg_uti
+      }))
+    } else {
+      productivityData.value = []
+      console.error('接口返回格式错误或无数据')
+    }
+  } catch (error) {
+    console.error('请求生产率配置失败:', error)
+    productivityData.value = []
   } finally {
     loadingProductivity.value = false
   }
