@@ -2160,7 +2160,7 @@ import os
 from django.conf import settings
 
 ROUTE_RANKING_CSV = os.path.join(
-    settings.BASE_DIR, "Predict_Datas", "route_ranking.csv"
+    settings.BASE_DIR, "Predict_Datas", "route_panel_ranking.csv"
 )
 
 
@@ -2289,7 +2289,7 @@ def forecast_panels_view(request):
           "large": {
             "headers": ["route", "2024-01", "2024-02", ...],
             "rows": [
-              ["SHA-PEK", 1200, 1300, ...],
+              ["SHA-PEK", 1200, 1300, ...],   # 现在是 SHA-PEK + PEK-SHA 的和
               ["PVG-CAN", 900, 920, ...]
             ]
           },
@@ -2344,7 +2344,7 @@ def forecast_panels_view(request):
 
         # 生成时间轴
         forecast_dates, time_labels = build_periods(gran, start_year, steps)
-        # print(panel_types)
+
         # 选择对应模型
         model_map = {
             "monthly": ForecastMonthly,
@@ -2366,8 +2366,7 @@ def forecast_panels_view(request):
 
             panel_routes[p] = routes
             all_routes.update(routes)
-            # print(all_routes)
-        # print(all_routes)
+
         # 如果一个航线都没有，就直接返回空结构
         if not all_routes:
             return JsonResponse(
@@ -2380,6 +2379,7 @@ def forecast_panels_view(request):
                     },
                 }
             )
+
         # 获取 route_ranking.csv 的总行数
         route_length = 0
         if os.path.exists(ROUTE_RANKING_CSV):
@@ -2387,10 +2387,12 @@ def forecast_panels_view(request):
                 reader = csv.DictReader(f)
                 route_length = sum(1 for row in reader)
 
-        # 用 OR 构造 (origin, destination) 条件
+        # ======================
+        # 1. 构造双向航线查询条件：od / do 都查
+        # ======================
         route_filter = Q()
         for o, d in all_routes:
-            route_filter |= Q(origin=o, destination=d)
+            route_filter |= Q(origin=o, destination=d) | Q(origin=d, destination=o)
 
         # 批量查询这些航线在指定 forecast_dates 的 ask
         qs = (
@@ -2398,15 +2400,29 @@ def forecast_panels_view(request):
             .values("origin", "destination", "forecast_date", "ask")
         )
 
-        # 构造一个 map: (origin, destination, forecast_date) -> ask
+        # ======================
+        # 2. 构造双向合并后的 map:
+        #    (无向航线 key: 规范化后的 o, d, forecast_date) -> ask(od) + ask(do)
+        # ======================
         ask_map = {}
         for row in qs:
-            key = (row["origin"], row["destination"], row["forecast_date"])
+            o = row["origin"]
+            d = row["destination"]
+            fdate = row["forecast_date"]
             val = row["ask"]
-            if val is not None:
-                ask_map[key] = round(val)  # 取整
+            if val is None:
+                val = 0
             else:
-                ask_map[key] = 0  # 如果 ask 为 None，赋值为 0
+                val = round(val)
+
+            # 规范化成无向航线 key，例如 SHA-PEK 和 PEK-SHA 都归为 (PEK, SHA) 或 (SHA, PEK)
+            if o <= d:
+                co, cd = o, d
+            else:
+                co, cd = d, o
+
+            key = (co, cd, fdate)
+            ask_map[key] = ask_map.get(key, 0) + val
 
         # 获取最新一次成功的预测时间（用 created_at）
         last_log = ForecastUpdateLog.objects.filter(status=2).order_by("-created_at").first()
@@ -2424,9 +2440,16 @@ def forecast_panels_view(request):
 
             for o, d in routes:
                 route_name = f"{o}-{d}"
+
+                # 对应到无向航线 key，用于拿到 od+do 的和
+                if o <= d:
+                    co, cd = o, d
+                else:
+                    co, cd = d, o
+
                 values = []
                 for fdate in forecast_dates:
-                    key = (o, d, fdate)
+                    key = (co, cd, fdate)
                     val = ask_map.get(key, 0)  # 没有的为 0
                     values.append(val)
                 rows.append([route_name] + values)
@@ -2435,7 +2458,7 @@ def forecast_panels_view(request):
                 "headers": headers,
                 "rows": rows,
             }
-        # print(panels_data)
+
         return JsonResponse(
             {
                 "success": True,
@@ -2461,6 +2484,8 @@ def forecast_panels_view(request):
             },
             status=500,
         )
+
+
 
 
 @api_view(['GET'])
@@ -2640,7 +2665,7 @@ def fleet_forecast_view(request):
           * 也支持 ?panels=large&panels=medium
 
     逻辑：
-      1. 按年份从 ForecastYearly 查 ASK
+      1. 按年份从 ForecastYearly 查 ASK（此处已改为双向航线 OD/DO 相加）
       2. 从 fleet_proportions.csv 找到对应机型的 μ
       3. 对每条航线、每个机型计算：
          - val_seats = ask * μ / avg_seats
@@ -2706,24 +2731,35 @@ def fleet_forecast_view(request):
                 status=400,
             )
 
-        # ------------ 5. 按年份从 ForecastYearly 查询 ASK ------------
+        # ------------ 5. 按年份从 ForecastYearly 查询 ASK（双向相加） ------------
         ModelCls = ForecastYearly
 
+        # 查询条件：每条航线的 OD / DO 都查出来
         route_filter = Q()
         for o, d in all_routes:
-            route_filter |= Q(origin=o, destination=d)
+            route_filter |= Q(origin=o, destination=d) | Q(origin=d, destination=o)
 
         qs = (
             ModelCls.objects.filter(route_filter, forecast_date__year=start_year)
             .values("origin", "destination", "ask")
         )
 
-        # (origin, destination) -> ask
+        # 无向航线 key：(co, cd) -> ask_od + ask_do
         ask_map = {}
         for row in qs:
-            key = (row["origin"], row["destination"])
+            o = row["origin"]
+            d = row["destination"]
             val = row["ask"]
-            ask_map[key] = float(val) if val is not None else 0.0
+            val = float(val) if val is not None else 0.0
+
+            # 规范化为无向航线 key，例如 SHA-PEK / PEK-SHA 都归一为 (SHA, PEK)
+            if o <= d:
+                co, cd = o, d
+            else:
+                co, cd = d, o
+
+            key = (co, cd)
+            ask_map[key] = ask_map.get(key, 0.0) + val
 
         # ------------ 6. 最新一次成功预测时间 ------------
         last_log = ForecastUpdateLog.objects.filter(status=2).order_by("-created_at").first()
@@ -2737,10 +2773,9 @@ def fleet_forecast_view(request):
         fleet_params = get_fleet_params_ordered()  # OrderedDict[fleet_type] = FleetParam
 
         # ------------ 8. 按 panel、按航线、按机型 计算 ask*μ/avg_xxx ------------
-        # 返回结构：panels_data[panel] = { "headers": [...], "rows": [...] }
         panels_data = {}
 
-        # 表头：origin, destination, 每个机队一列（值为 float_num）
+        # 表头：route, 每个机队一列（值为 float_num）
         headers = ["route"] + FLEET_COLS
 
         for p in panel_types:
@@ -2748,10 +2783,16 @@ def fleet_forecast_view(request):
             rows = []
 
             for (o, d) in routes:
-                ask_val = ask_map.get((o, d), 0.0)
+                # ASK 使用双向相加后的无向 key
+                if o <= d:
+                    co, cd = o, d
+                else:
+                    co, cd = d, o
+                ask_val = ask_map.get((co, cd), 0.0)
+
+                # μ 仍然按配置的 (o, d) 方向来取
                 mu_for_route = mu_map.get((o, d), {})
 
-                # 这一行的起始：origin, destination
                 route_name = f"{o}-{d}"
                 row = [route_name]
 
@@ -2761,12 +2802,12 @@ def fleet_forecast_view(request):
                     fp = fleet_params.get(fleet_type)
 
                     if (
-                            not fp
-                            or mu == 0
-                            or ask_val == 0
-                            or fp.avg_seats in (None, 0)
-                            or fp.avg_speed in (None, 0)
-                            or fp.avg_uti in (None, 0)
+                        not fp
+                        or mu == 0
+                        or ask_val == 0
+                        or fp.avg_seats in (None, 0)
+                        or fp.avg_speed in (None, 0)
+                        or fp.avg_uti in (None, 0)
                     ):
                         float_num = 0.0
                     else:
@@ -2774,8 +2815,8 @@ def fleet_forecast_view(request):
                         avg_speed = float(fp.avg_speed)
                         avg_uti = float(fp.avg_uti)
 
-                        # 飞机数量 float_num = ask * μ / (avg_seats * avg_speed * avg_uti)
-                        float_num = int(ask_val * mu / (avg_seats * avg_speed * avg_uti*365))
+                        # 飞机数量 float_num = ask * μ / (avg_seats * avg_speed * avg_uti * 365)
+                        float_num = int(ask_val * mu / (avg_seats * avg_speed * avg_uti * 365))
 
                     row.append(round(float_num, 6))
 
@@ -2811,6 +2852,7 @@ def fleet_forecast_view(request):
             },
             status=500,
         )
+
 
 @api_view(['GET'])
 def fleet_param_list_view(request):
