@@ -2565,41 +2565,73 @@ FLEET_COLS = [
 ]
 def load_fleet_mu_map():
     """
-    读取 fleet_proportions.csv：
-    返回 {(origin, destination): {fleet_type: μ(0~1)}} 的 dict
+    读取 fleet_proportions.csv，返回:
+    {
+      (origin, destination): {
+          "大型涡扇支线客机": μ1,
+          "小型窄体客机": μ2,
+          ...
+      },
+      ...
+    }
+    自动尝试多种常见编码，避免 gbk / utf-8 报错。
     """
     mu_map = {}
 
     if not os.path.exists(FLEET_PROP_CSV):
         return mu_map
 
-    with open(FLEET_PROP_CSV, newline="", encoding="gbk") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            origin = row.get("origin")
-            dest = row.get("destination")
-            if not origin or not dest:
-                continue
+    # 依次尝试这些编码
+    encodings_to_try = ("utf-8", "utf-8-sig", "gbk", "gb2312", "cp1252")
 
-            key = (origin, dest)
-            inner = {}
-            for col in FLEET_COLS:
-                val = row.get(col)
-                if val in (None, "", "NaN"):
-                    continue
-                try:
-                    inner[col] = float(val)
-                except ValueError:
-                    continue
+    last_err = None
 
-            mu_map[key] = inner
+    for enc in encodings_to_try:
+        try:
+            with open(FLEET_PROP_CSV, newline="", encoding=enc) as f:
+                reader = csv.DictReader(f)
 
-    return mu_map
+                tmp_map = {}
+                for row in reader:
+                    origin = row.get("origin")
+                    dest = row.get("destination")
+                    if not origin or not dest:
+                        continue
+
+                    key = (origin, dest)
+                    inner = {}
+                    for col in FLEET_COLS:
+                        val = row.get(col)
+                        if val in (None, "", "NaN"):
+                            continue
+                        try:
+                            inner[col] = float(val)
+                        except ValueError:
+                            continue
+
+                    tmp_map[key] = inner
+
+            # 如果成功读完，赋值给 mu_map 并返回
+            mu_map = tmp_map
+            # 你想的话可以打个 log 看最终使用的是哪个编码
+            print(f"[load_fleet_mu_map] 使用编码读取成功: {enc}")
+            return mu_map
+
+        except UnicodeDecodeError as e:
+            last_err = e
+            # 换下一个编码继续试
+            continue
+
+    # 如果所有编码都失败，就把最后一次错误抛出去（方便你在返回里看到）
+    raise last_err if last_err else UnicodeDecodeError(
+        "unknown", b"", 0, 1, "无法识别文件编码"
+    )
+
 
 @api_view(['GET'])
 def fleet_forecast_view(request):
     """
-    GET /api/forecast-panels/year=2024&panels=large,medium,all
+    GET /api/fleet_forecast_view/year=2024&panels=large,medium,all
 
     参数：
       - year: 开始年份 (int)
@@ -2709,7 +2741,7 @@ def fleet_forecast_view(request):
         panels_data = {}
 
         # 表头：origin, destination, 每个机队一列（值为 float_num）
-        headers = ["origin", "destination"] + FLEET_COLS
+        headers = ["route"] + FLEET_COLS
 
         for p in panel_types:
             routes = panel_routes[p]
@@ -2720,7 +2752,8 @@ def fleet_forecast_view(request):
                 mu_for_route = mu_map.get((o, d), {})
 
                 # 这一行的起始：origin, destination
-                row = [o, d]
+                route_name = f"{o}-{d}"
+                row = [route_name]
 
                 # 按 FLEET_COLS 的顺序依次算每个机队的 float_num
                 for fleet_type in FLEET_COLS:
