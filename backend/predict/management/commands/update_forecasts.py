@@ -443,7 +443,9 @@ class Command(BaseCommand):
                         if 'Predicted_ASK' not in df.columns:
                             df['Predicted_ASK'] = df['Predicted_Seats'] * df['Distance']
 
-                        cols_to_sum = df[['Predicted_Seats', 'Predicted_ASK']].fillna(0)
+                        cols_to_sum = df[['Predicted_Seats', 'Predicted_ASK']].rename(
+                            columns={'Predicted_Seats': 'Seats', 'Predicted_ASK': 'ASK'}
+                        ).fillna(0)
 
                         if combined_pred_df.empty:
                             combined_pred_df = cols_to_sum
@@ -515,8 +517,9 @@ class Command(BaseCommand):
                     if not df_hist.empty:
                         df_hist['YearMonth'] = pd.to_datetime(df_hist['year_month'])
                         df_hist = df_hist.set_index('YearMonth')
-                        df_hist['Seats'] = pd.to_numeric(df_hist['route_total_seats']).fillna(0)
-                        df_hist['ASK'] = df_hist['Seats'] * pd.to_numeric(df_hist['distance_km']).fillna(0)
+                        df_hist['Seats'] = pd.to_numeric(df_hist['route_total_seats']).fillna(0).astype(int)
+                        df_hist['ASK'] = (df_hist['Seats'] * pd.to_numeric(df_hist['distance_km']).fillna(0)).astype(
+                            int)
 
                         cols = df_hist[['Seats', 'ASK']]
 
