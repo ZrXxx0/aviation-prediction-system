@@ -2,16 +2,16 @@
   <div class="data-show-page">
     <!-- Controls -->
     <div class="controls" ref="controlsRef">
-      <el-row :gutter="12" align="middle">
-        <el-col :span="6">
+      <div class="controls-left">
+        <div style="min-width: 120px; max-width: 240px;">
           <el-select v-model="granularity" placeholder="选择粒度" style="width:100%">
             <el-option label="年度" value="年度" />
             <el-option label="季度" value="季度" />
             <el-option label="月度" value="月度" />
           </el-select>
-        </el-col>
+        </div>
 
-        <el-col :span="5">
+        <div style="min-width: 120px; max-width: 240px;">
           <el-input-number
             v-model="years"
             :min="1"
@@ -20,75 +20,67 @@
             style="width:100%"
             placeholder="年数 (1 - 20)"
           />
-        </el-col>
+        </div>
 
-        <el-col :span="7">
+        <div style="min-width: 120px; max-width: 240px;">
           <el-checkbox-group v-model="selectedClasses" style="display:flex; gap:8px;">
             <el-checkbox label="large">大运量（100条）</el-checkbox>
             <el-checkbox label="medium">中运量（400条）</el-checkbox>
             <el-checkbox label="small">小运量(加总)</el-checkbox>
+            <el-checkbox label="all">全国（总体）</el-checkbox>
           </el-checkbox-group>
-        </el-col>
+        </div>
+      </div>
 
-        <el-col :span="4">
+      <div class="controls-right">
+        <div style="min-width: 100px; max-width: 180px;">
           <el-select v-model="viewMode" style="width:100%">
             <el-option label="表格视图" value="table" />
             <el-option label="聚合总量" value="aggregate" />
             <el-option label="热力图" value="heatmap" />
           </el-select>
-        </el-col>
+        </div>
 
-        <el-col :span="2" class="btn-col">
-          <!-- 点击加载时使用内部静态数据假装后端返回；已保留注释的真实请求示例 -->
+        <div class="btn-col" style="min-width: 100px; max-width: 180px;">
           <el-button type="primary" @click="loadForecast" :loading="loading">加载运力预测结果</el-button>
-        </el-col>
-      </el-row>
-
-      <el-row style="margin-top:10px;" align="middle">
-        <el-col :span="18">
-          <div class="small-help">说明：长度按“年”计（最大 20 年）；视图包括：表格/聚合/热力图展示</div>
-        </el-col>
-      </el-row>
+        </div>
+      </div>
     </div>
 
     <!-- Main content -->
     <div class="content">
       <div class="chart-area-wrap">
-        <!-- 表格视图 -->
+        <!-- 表格视图: 使用普通带滚动条的容器 -->
         <div
           v-if="viewMode === 'table'"
-          class="table-wrap draggable"
+          class="table-wrap"
           ref="tableWrapRef"
-          :style="{ overflow: 'auto' }"
+          style="overflow: auto; max-height: 520px;"
         >
-          <!-- inner container enforces wide min-width so horizontal scrollbar appears when needed -->
-          <div class="table-inner" :style="{ minWidth: tableMinWidth }">
-            <el-table
-              :data="panelRows"
-              stripe
-              size="small"
-              style="width:100%;"
-              :max-height="520"
-              v-loading="loading"
-            >
-              <el-table-column prop="route" label="预测结果" min-width="120" fixed />
-              <el-table-column
-                v-for="col in tableColumns"
-                :key="col.key"
-                :prop="col.key"
-                :label="col.label"
-                :min-width="90"
-              />
-            </el-table>
-          </div>
+          <el-table
+            :data="panelRows"
+            stripe
+            size="small"
+            style="min-width: 900px; width: 100%;"
+            v-loading="loading"
+          >
+            <el-table-column prop="route" label="预测结果" min-width="120" fixed />
+            <el-table-column
+              v-for="col in tableColumns"
+              :key="col.key"
+              :prop="col.key"
+              :label="col.label"
+              min-width="90"
+            />
+          </el-table>
         </div>
 
         <!-- 图表区域（聚合/热力） -->
         <div
           v-show="viewMode !== 'table'"
           ref="chartRef"
-          class="chart-area draggable"
-          :style="{ overflow: 'auto', minWidth: chartMinWidth }"
+          class="chart-area"
+          style="overflow: auto; min-width: 800px;"
         ></div>
       </div>
 
@@ -135,14 +127,12 @@
       title="数据更新记录"
       width="600px"
     >
-      <!-- 表格 -->
       <el-table :data="updateLogs" stripe size="small" style="width: 100%">
         <el-table-column prop="start_time" label="开始时间" width="180" />
         <el-table-column prop="end_time" label="结束时间" width="180" />
         <el-table-column prop="status" label="状态" min-width="120" />
       </el-table>
 
-      <!-- 底部按钮 -->
       <div style="text-align:center; margin-top: 20px;">
         <el-button
           type="primary"
@@ -183,7 +173,9 @@ const loadUpdateStatus = async () => {
       updateLogs.value = data.logs || []
       canUpdate.value = data.can_update
     }
-  } catch (err) { console.error('加载更新记录失败:', err) }
+  } catch (err) {
+    console.error('加载更新记录失败:', err)
+  }
 }
 
 const doUpdate = async () => {
@@ -191,7 +183,6 @@ const doUpdate = async () => {
   try {
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE_ALL)
     const res = await axios.post(url)
-    console.log('更新响应:', res.data)
     if (res.data.code === 200) {
       ElMessage.success('更新已开始')
       loadUpdateStatus()
@@ -204,7 +195,7 @@ const doUpdate = async () => {
 /* ------------------ main state ------------------ */
 const granularity = ref('年度')
 const years = ref(10)
-let total_count = ref(null)
+const total_count = ref(null)
 const selectedClasses = ref(['large'])
 const viewMode = ref('table')
 const loading = ref(false)
@@ -212,7 +203,6 @@ const loading = ref(false)
 const chartRef = ref(null)
 const tableWrapRef = ref(null)
 let chartInstance = null
-let ro = null
 
 const dataStore = reactive({ large: null, medium: null, small: null, _prepared: [] })
 const labels = ref([])
@@ -222,11 +212,9 @@ const periods = computed(() => {
   if (granularity.value === '年度') return y
   if (granularity.value === '季度') return y * 4
   return y * 12
-  // return y
 })
 
-const hasData = computed(() => (Array.isArray(dataStore._prepared) && dataStore._prepared.length > 0))
-const preparedCount = computed(() => (Array.isArray(dataStore._prepared) ? dataStore._prepared.length : 0))
+const hasData = computed(() => Array.isArray(dataStore._prepared) && dataStore._prepared.length > 0)
 
 /* ------------------ fetch / parse / prepare ------------------ */
 async function loadForecast() {
@@ -237,7 +225,6 @@ async function loadForecast() {
   loading.value = true
   try {
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.SHOW)
-
     const res = await axios.get(url, {
       params: {
         panels: selectedClasses.value.join(','),
@@ -251,21 +238,19 @@ async function loadForecast() {
       },
       timeout: 60000
     })
-    console.log('后端返回数据:', res.data.data)
 
     if (!res.data.data || !res.data.data.panels) {
       throw new Error('后端返回数据格式错误：缺少 panels')
     }
-    total_count.value = res.data.data.route_length
-    console.log('总计算航线数:', total_count.value)
-    parseBackend(res.data.data)          // 解析数据
-    prepareVisualData()             // 准备图表/表格数据
+    total_count.value = res.data.data.route_length || null
+    parseBackend(res.data.data)
+    prepareVisualData()
+
+    // 切换视图时渲染图表（如果不是表格视图）
     if (viewMode.value !== 'table') renderChart()
     nextTick(() => chartInstance?.resize())
 
-    ElMessage.success(
-      `数据加载成功，更新时间：${res.data.data.forecast_time || '未知'}`
-    )
+    ElMessage.success(`数据加载成功，更新时间：${res.data.data.forecast_time || '未知'}`)
   } catch (err) {
     console.error(err)
     ElMessage.error('加载失败，请检查网络或后台接口')
@@ -275,26 +260,20 @@ async function loadForecast() {
 }
 
 function parseBackend(resp) {
-  // 重置
   dataStore.large = dataStore.medium = dataStore.small = null
   labels.value = []
-
   if (!resp) return
-  if (Array.isArray(resp.time_points)) {
+
+  if (Array.isArray(resp.time_points) && resp.time_points.length > 0) {
     labels.value = resp.time_points.slice()
-  } else {
-    console.warn('缺少 time_points，使用 genLabels() 生成')
-    labels.value = genLabels()
   }
+
   const panels = resp.panels || {}
 
   ;['large', 'medium', 'small'].forEach(cls => {
     const panel = panels[cls]
-
-    if (!panel) return
-    if (!Array.isArray(panel.rows)) return
+    if (!panel || !Array.isArray(panel.rows)) return
     const rows = panel.rows
-    // 第一列是 route，剩下是数据
     const routes = rows.map(row => row[0])
     const data = rows.map(row =>
       row.slice(1).map(v => (isNaN(Number(v)) ? 0 : Number(v)))
@@ -308,8 +287,8 @@ function parseBackend(resp) {
 }
 
 function prepareVisualData() {
-  if (!Array.isArray(labels.value) || !labels.value.length) {
-    labels.value = genLabels()
+  if (!Array.isArray(labels.value) || labels.value.length === 0) {
+    labels.value = []
   }
 
   const build = (store, cls) => {
@@ -340,78 +319,96 @@ function renderChart() {
   if (!chartRef.value) return
   if (!chartInstance) chartInstance = echarts.init(chartRef.value)
   chartInstance.clear()
+
   const prepared = Array.isArray(dataStore._prepared) ? dataStore._prepared : []
   if (!prepared.length) {
-    chartInstance.setOption({ graphic: [{ type: 'text', left: 'center', top: 'center', style: { text: '暂无数据，请点击加载', fontSize: 22, fill: '#909399' } }] })
+    chartInstance.setOption({
+      graphic: [
+        {
+          type: 'text',
+          left: 'center',
+          top: 'center',
+          style: { text: '暂无数据，请点击加载', fontSize: 22, fill: '#909399' }
+        }
+      ]
+    })
     return
   }
 
   if (viewMode.value === 'aggregate') {
     const sum = new Array(labels.value.length).fill(0)
-    prepared.forEach(s => { for (let i=0;i<labels.value.length;i++) sum[i] += Number((s.values || [])[i]) || 0 })
-    chartInstance.setOption({
-      tooltip: { trigger: 'axis' },
-      xAxis: { type: 'category', data: labels.value, axisLabel: { interval: Math.ceil(labels.value.length/12) } },
-      yAxis: { type: 'value' },
-      series: [{ name: '总运力', type: 'line', data: sum, smooth: true, areaStyle: { opacity: 0.18 } }]
-    }, true)
+    prepared.forEach(s => {
+      for (let i = 0; i < labels.value.length; i++) {
+        sum[i] += Number((s.values || [])[i]) || 0
+      }
+    })
+    chartInstance.setOption(
+      {
+        tooltip: { trigger: 'axis' },
+        xAxis: {
+          type: 'category',
+          data: labels.value,
+          axisLabel: { interval: Math.ceil(labels.value.length / 12) }
+        },
+        yAxis: { type: 'value' },
+        series: [
+          {
+            name: '总运力',
+            type: 'line',
+            data: sum,
+            smooth: true,
+            areaStyle: { opacity: 0.18 }
+          }
+        ]
+      },
+      true
+    )
     return
   }
 
   if (viewMode.value === 'heatmap') {
     const rows = prepared
     const heatData = []
-    for (let i=0;i<rows.length;i++){
-      for (let j=0;j<labels.value.length;j++){
+    for (let i = 0; i < rows.length; i++) {
+      for (let j = 0; j < labels.value.length; j++) {
         heatData.push([j, i, Number((rows[i].values || [])[j] || 0)])
       }
     }
-    chartInstance.setOption({
-      tooltip: { position: 'top', formatter: p => `时间: ${labels.value[p.value[0]]}<br/>航线: ${rows[p.value[1]].route}<br/>值: ${p.value[2]}` },
-      grid: { left: 140, right: 60, bottom: 80, containLabel: true },
-      xAxis: { type: 'category', data: labels.value, axisLabel: { interval: Math.ceil(labels.value.length/12) } },
-      yAxis: { type: 'category', data: rows.map(r => r.route), axisLabel: { interval: 0 } },
-      visualMap: { min: 0, max: Math.max(...heatData.map(d=>d[2]),1), calculable: true, orient:'vertical', right:10, top:'center' },
-      series: [{ name:'heat', type:'heatmap', data:heatData, progressive:2000 }]
-    }, true)
+    chartInstance.setOption(
+      {
+        tooltip: {
+          position: 'top',
+          formatter: p =>
+            `时间: ${labels.value[p.value[0]]}<br/>航线: ${rows[p.value[1]].route}<br/>值: ${p.value[2]}`
+        },
+        grid: { left: 140, right: 60, bottom: 80, containLabel: true },
+        xAxis: {
+          type: 'category',
+          data: labels.value,
+          axisLabel: { interval: Math.ceil(labels.value.length / 12) }
+        },
+        yAxis: {
+          type: 'category',
+          data: rows.map(r => r.route),
+          axisLabel: { interval: 0 }
+        },
+        visualMap: {
+          min: 0,
+          max: Math.max(...heatData.map(d => d[2]), 1),
+          calculable: true,
+          orient: 'vertical',
+          right: 10,
+          top: 'center'
+        },
+        series: [{ name: 'heat', type: 'heatmap', data: heatData, progressive: 2000 }]
+      },
+      true
+    )
     return
   }
 }
 
-/* ------------------ helpers / gen labels / export ------------------ */
-function genLabels() {
-  const cnt = periods.value
-  const out = []
-  const start = new Date().getFullYear()
-  if (granularity.value === '年度') {
-    for (let i=0;i<cnt;i++) out.push(String(start + i))
-    return out
-  }
-  if (granularity.value === '季度') {
-    for (let y=0;y<years.value;y++) {
-      const yr = start + y
-      for (let q=1;q<=4;q++) out.push(`${yr}-Q${q}`)
-    }
-    return out
-  }
-  for (let y=0;y<years.value;y++) {
-    const yr = start + y
-    for (let m=1;m<=12;m++) out.push(`${yr}-${String(m).padStart(2,'0')}`)
-  }
-  return out
-}
-
-function resetResults() {
-  dataStore.large = dataStore.medium = dataStore.small = null
-  dataStore._prepared = []
-  labels.value = []
-  if (chartInstance) {
-    chartInstance.clear()
-    chartInstance.setOption({ graphic: [{ type: 'text', left: 'center', top: 'center', style: { text: '结果已重置', fontSize: 14, fill: '#909399' } }] })
-  }
-  ElMessage.success('已重置结果')
-}
-
+/* ------------------ helpers / export ------------------ */
 function exportData() {
   const prepared = Array.isArray(dataStore._prepared) ? dataStore._prepared : []
   if (!prepared.length) {
@@ -419,7 +416,10 @@ function exportData() {
     return
   }
   const header = ['route', ...labels.value]
-  const rows = prepared.map(s => [s.route, ...(s.values || []).map(v => (v === null || v === undefined) ? '' : v)])
+  const rows = prepared.map(s => [
+    s.route,
+    ...(s.values || []).map(v => (v === null || v === undefined ? '' : v))
+  ])
   const aoa = [header, ...rows]
   try {
     const ws = XLSX.utils.aoa_to_sheet(aoa)
@@ -438,34 +438,23 @@ const tableColumns = computed(() => {
   if (!Array.isArray(labels.value)) return []
   return labels.value.map(l => ({ key: l, label: l }))
 })
+
 const panelRows = computed(() => {
   const prepared = Array.isArray(dataStore._prepared) ? dataStore._prepared : []
   if (!prepared.length) return []
   const cols = Array.isArray(labels.value) ? labels.value : []
   return prepared.map(s => {
     const obj = { route: s.route }
-    cols.forEach((l, idx) => { obj[l] = (s.values && s.values[idx] != null) ? s.values[idx] : 0 })
+    cols.forEach((l, idx) => {
+      obj[l] = s.values && s.values[idx] != null ? s.values[idx] : 0
+    })
     return obj
   })
 })
 
-const tableMinWidth = computed(() => {
-  const cols = Array.isArray(labels.value) ? labels.value.length : 0
-  const base = 200
-  const per = 100
-  const w = Math.max(800, base + cols * per)
-  return w + 'px'
-})
-const chartMinWidth = computed(() => {
-  const points = Array.isArray(labels.value) ? labels.value.length : 12
-  const per = 80
-  const w = Math.max(800, points * per)
-  return w + 'px'
-})
-
 const summaryTable = computed(() => {
   const rows = []
-  const classes = { large: '大运量', medium: '中运量', small: '小运量(加总)' }
+  const classes = { large: '大运量', medium: '中运量', small: '小运量(加总)', all: '全国（总体）' }
   selectedClasses.value.forEach(cls => {
     const store = dataStore[cls]
     if (!store) {
@@ -476,175 +465,63 @@ const summaryTable = computed(() => {
     const data = Array.isArray(store.data) ? store.data : []
     const periodsCnt = Array.isArray(labels.value) && labels.value.length ? labels.value.length : periods.value
     const agg = new Array(periodsCnt).fill(0)
-    data.forEach(arr => { for (let i=0;i<periodsCnt;i++) agg[i] += Number(arr[i] || 0) })
-    const total = agg.reduce((s,v)=>s+v,0)
+    data.forEach(arr => {
+      for (let i = 0; i < periodsCnt; i++) agg[i] += Number(arr[i] || 0)
+    })
+    const total = agg.reduce((s, v) => s + v, 0)
     const avg = periodsCnt ? total / periodsCnt : 0
     const first = agg[0] || 0
-    const last = agg[agg.length-1] || 0
-    const growth = first > 0 ? Math.pow(last/first || 1, 1/Math.max(1, years.value)) - 1 : (last>0 ? 1 : 0)
+    const last = agg[agg.length - 1] || 0
+    const growth = first > 0 ? Math.pow(last / first || 1, 1 / Math.max(1, years.value)) - 1 : last > 0 ? 1 : 0
     rows.push({ classLabel: classes[cls], routeCount: routes.length, total, avg, growth })
   })
   return rows
 })
 
-function fmtNumber(_, __, v) { return (v === null || v === undefined) ? '-' : Number(v).toLocaleString() }
-function fmtPct(_, __, v) { return (v === null || v === undefined) ? '-' : (v*100).toFixed(2) + '%' }
-
-/* ------------------ drag-to-scroll (safe) ------------------ */
-function enableDragScroll(el) {
-  if (!el) return () => {}
-  let isDown = false
-  let startX = 0
-  let startY = 0
-  let scrollLeft = 0
-  let scrollTop = 0
-
-  const onMouseDown = (e) => {
-    if (e.button !== undefined && e.button !== 0) return
-    isDown = true
-    el.classList.add('dragging')
-    startX = e.pageX - el.offsetLeft
-    startY = e.pageY - el.offsetTop
-    scrollLeft = el.scrollLeft
-    scrollTop = el.scrollTop
-    // prevent text selection
-    document.body.style.userSelect = 'none'
-  }
-  const onMouseMove = (e) => {
-    if (!isDown) return
-    const x = e.pageX - el.offsetLeft
-    const y = e.pageY - el.offsetTop
-    const walkX = x - startX
-    const walkY = y - startY
-    el.scrollLeft = scrollLeft - walkX
-    el.scrollTop = scrollTop - walkY
-  }
-  const onMouseUp = () => {
-    if (!isDown) return
-    isDown = false
-    el.classList.remove('dragging')
-    document.body.style.userSelect = ''
-  }
-
-  const onTouchStart = (e) => {
-    isDown = true
-    el.classList.add('dragging')
-    const t = e.touches[0]
-    startX = t.pageX - el.offsetLeft
-    startY = t.pageY - el.offsetTop
-    scrollLeft = el.scrollLeft
-    scrollTop = el.scrollTop
-  }
-  const onTouchMove = (e) => {
-    if (!isDown) return
-    const t = e.touches[0]
-    const x = t.pageX - el.offsetLeft
-    const y = t.pageY - el.offsetTop
-    const walkX = x - startX
-    const walkY = y - startY
-    el.scrollLeft = scrollLeft - walkX
-    el.scrollTop = scrollTop - walkY
-  }
-  const onTouchEnd = () => {
-    if (!isDown) return
-    isDown = false
-    el.classList.remove('dragging')
-  }
-
-  // use passive:false for mousedown so preventDefault can be used if needed later
-  el.addEventListener('mousedown', onMouseDown, { passive: false })
-  window.addEventListener('mousemove', onMouseMove, { passive: true })
-  window.addEventListener('mouseup', onMouseUp, { passive: true })
-  el.addEventListener('touchstart', onTouchStart, { passive: false })
-  el.addEventListener('touchmove', onTouchMove, { passive: false })
-  el.addEventListener('touchend', onTouchEnd, { passive: true })
-
-  return () => {
-    try {
-      el.removeEventListener('mousedown', onMouseDown)
-      window.removeEventListener('mousemove', onMouseMove)
-      window.removeEventListener('mouseup', onMouseUp)
-      el.removeEventListener('touchstart', onTouchStart)
-      el.removeEventListener('touchmove', onTouchMove)
-      el.removeEventListener('touchend', onTouchEnd)
-    } catch (e) { /* ignore */ }
-  }
+function fmtNumber(_, __, v) {
+  return v === null || v === undefined ? '-' : Number(v).toLocaleString()
+}
+function fmtPct(_, __, v) {
+  return v === null || v === undefined ? '-' : (v * 100).toFixed(2) + '%'
 }
 
-let dragCleanups = []
+watch(
+  () => dataStore._prepared,
+  (newVal) => {
+    if (viewMode.value !== 'table' && hasData.value) {
+      renderChart()
+      nextTick(() => chartInstance?.resize())
+    }
+  },
+  { deep: true }
+)
 
-/* ------------------ IMPORTANT: keep onWinResize in module scope so we can remove it on unmount ------------------ */
-let onWinResize = null
+// 监听视图切换，自动渲染图表视图
+watch(viewMode, (newVal) => {
+  if (newVal !== 'table' && hasData.value) {
+    renderChart()
+    nextTick(() => chartInstance?.resize())
+  }
+})
 
 onMounted(() => {
-  // 初始化图表占位
   setTimeout(() => {
     if (chartRef.value) {
       chartInstance = echarts.init(chartRef.value)
       chartInstance.setOption({
-        graphic: [{ type:'text', left:'center', top:'center', style:{ text:'加载中...', fontSize:14, fill:'#909399' } }]
+        graphic: [
+          {
+            type: 'text',
+            left: 'center',
+            top: 'center',
+            style: { text: '加载中...', fontSize: 14, fill: '#909399' }
+          }
+        ]
       })
     }
   }, 50)
 
-  // 将 onWinResize 赋值到外层变量，确保 removeEventListener 时引用一致
-  onWinResize = () => chartInstance?.resize()
-  window.addEventListener('resize', onWinResize)
-
-  if (typeof ResizeObserver !== 'undefined') {
-    ro = new ResizeObserver(() => chartInstance?.resize())
-    nextTick(() => {
-      if (chartRef.value && chartRef.value.parentElement) ro.observe(chartRef.value.parentElement)
-    })
-  }
-
-  // 设置拖动滚动监听（安全绑定并收集 cleanup）
-  nextTick(() => {
-    if (tableWrapRef.value) {
-      dragCleanups.push(enableDragScroll(tableWrapRef.value))
-    }
-    if (chartRef.value) {
-      dragCleanups.push(enableDragScroll(chartRef.value))
-    }
-  })
-
-  // 页面进入时自动加载数据
   loadForecast()
-})
-
-onBeforeUnmount(() => {
-  // 先移除 resize 监听（确保 onWinResize 在模块作用域）
-  try {
-    if (onWinResize) window.removeEventListener('resize', onWinResize)
-  } catch (e) { console.warn('remove resize failed', e) }
-
-  // 断开 ResizeObserver
-  try { if (ro) { ro.disconnect(); ro = null } } catch (e) { /* ignore */ }
-
-  // 销毁图表实例
-  try { chartInstance?.dispose(); chartInstance = null } catch (e) { /* ignore */ }
-
-  // 调用并清理拖拽 cleanup
-  try {
-    dragCleanups.forEach(fn => { try { fn() } catch (e) {} })
-    dragCleanups = []
-  } catch (e) { /* ignore */ }
-})
-
-/* ------------------ watch ------------------ */
-watch(viewMode, (v) => {
-  nextTick(() => {
-    // 清理旧的 drag handlers
-    dragCleanups.forEach(fn => { try { fn() } catch (e) {} })
-    dragCleanups = []
-    if (v === 'table') {
-      if (tableWrapRef.value) dragCleanups.push(enableDragScroll(tableWrapRef.value))
-    } else {
-      if (chartRef.value) dragCleanups.push(enableDragScroll(chartRef.value))
-      if (hasData.value) renderChart()
-      chartInstance?.resize()
-    }
-  })
 })
 </script>
 
@@ -652,7 +529,7 @@ watch(viewMode, (v) => {
 .data-show-page {
   padding: 12px;
   width: 100%;
-  box-sizing: border-box; /* 统一设置 */
+  box-sizing: border-box;
 }
 
 /* Controls */
@@ -663,9 +540,52 @@ watch(viewMode, (v) => {
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
   margin-bottom: 12px;
   box-sizing: border-box;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
 }
 
-/* Content area */
+/* 左侧容器：下拉、数字输入、复选框，左对齐 */
+.controls-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  flex: 1 1 auto;
+}
+
+/* 里面的 el-col 保证宽度 */
+.controls-left > * {
+  min-width: 120px;
+  max-width: 240px;
+}
+
+/* 右侧容器：视图选择和按钮，右对齐 */
+.controls-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+  flex: 0 0 auto;
+}
+
+/* 里面的 el-col 也限制宽度 */
+.controls-right > * {
+  min-width: 100px;
+  max-width: 180px;
+}
+
+/* 保持按钮容器布局 */
+.btn-col {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+/* 其他已有样式保留 */
 .content {
   display: flex;
   gap: 16px;
@@ -675,30 +595,27 @@ watch(viewMode, (v) => {
   box-sizing: border-box;
 }
 
-/* Chart & table container */
 .chart-area-wrap {
   flex: 1 1 auto;
-  min-width: 0; /* 允许收缩 */
+  min-width: 0;
   display: flex;
   flex-direction: column;
 }
 
-/* 外层容器：让它成为真正的显示框 */
 .table-wrap {
-  height: 100%;    
+  height: 100%;
   max-height: 700px;
   min-height: 660px;
-  overflow: hidden; 
+  overflow: hidden;
   background: #fff;
   border-radius: 6px;
-  padding: 0;  
+  padding: 0;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
   width: 100%;
   display: flex;
   flex-direction: column;
 }
 
-/* 中间层让表格吃满可用空间 */
 .table-inner {
   flex: 1;
   width: 100%;
@@ -708,18 +625,15 @@ watch(viewMode, (v) => {
   box-sizing: border-box;
 }
 
-/* 表格必须强制填满容器 */
 .table-inner .el-table {
   height: 100% !important;
   width: 100%;
 }
 
-/* 去掉 el-table 自带 margin/padding */
 .el-table {
   margin: 0 !important;
 }
 
-/* Chart container */
 .chart-area {
   flex: 1 1 auto;
   min-height: 360px;
@@ -729,22 +643,10 @@ watch(viewMode, (v) => {
   padding: 8px;
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
   box-sizing: border-box;
-  overflow: auto; /* 双轴滚动 */
+  overflow: auto;
   width: 100%;
 }
 
-/* Draggable cursor style */
-.draggable {
-  cursor: grab;
-  user-select: none;
-  -webkit-user-select: none;
-  -ms-user-select: none;
-}
-.draggable.dragging {
-  cursor: grabbing !important;
-}
-
-/* Side panel */
 .side-panel {
   flex: 0 0 360px;
   width: 360px;
@@ -760,7 +662,6 @@ watch(viewMode, (v) => {
   margin-left: 6px;
 }
 
-/* Responsive: medium screens */
 @media (max-width: 1100px) {
   .content {
     flex-direction: column;
@@ -776,12 +677,15 @@ watch(viewMode, (v) => {
   }
 }
 
-/* Responsive: small screens */
 @media (max-width: 640px) {
-  .controls .el-col {
-    width: 100% !important;
-    display: block;
-    margin-bottom: 8px;
+  .controls-left > * {
+    min-width: 100px;
+  }
+  .controls-right > * {
+    min-width: 80px;
+  }
+  .controls {
+    flex-wrap: wrap;
   }
   .chart-area {
     min-height: 280px;
@@ -793,7 +697,6 @@ watch(viewMode, (v) => {
   }
 }
 
-/* Side actions buttons */
 .side-actions {
   display: flex;
   flex-direction: column;
@@ -815,11 +718,5 @@ watch(viewMode, (v) => {
 .card-header {
   font-weight: 600;
   color: #333;
-}
-
-.btn-col {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
 }
 </style>
