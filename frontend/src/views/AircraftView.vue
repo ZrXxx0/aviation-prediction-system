@@ -20,7 +20,6 @@
           <el-radio-group
             v-model="selectedClass"
             class="radio-group-flex"
-            size="small"
             style="width:100%;"
           >
             <el-radio label="large">大运量（100条）</el-radio>
@@ -84,7 +83,7 @@
               :max-height="contentTableMaxHeight"
               v-loading="loading"
             >
-              <el-table-column prop="route" label="航线" min-width="120" fixed />
+              <el-table-column prop="route" label="预测结果" min-width="120" fixed />
               <el-table-column
                 v-for="col in tableColumns"
                 :key="col.key"
@@ -271,7 +270,7 @@ const clearForecastData = () => {
 }
 
 const parsePanelData = (payload) => {
-  const key = selectedClass.value   // ⭐ 动态取 large / medium / all
+  const key = selectedClass.value
   const headers = payload?.panels?.[key]?.headers || []
   const rows = payload?.panels?.[key]?.rows || []
 
@@ -456,7 +455,7 @@ const renderPieChart = () => {
 const exportData = () => {
   if (!panelRows.value.length || !tableColumns.value.length) return
 
-  const headers = ['航线', ...tableColumns.value.map(c => c.label)]
+  const headers = ['机队结构预测结果', ...tableColumns.value.map(c => c.label)]
   const csvRows = [headers.join(',')]
 
   panelRows.value.forEach(row => {
@@ -469,7 +468,7 @@ const exportData = () => {
   const blob = new Blob([csvRows.join('\n')], { type: 'text/csv;charset=utf-8;' })
   const link = document.createElement('a')
   link.href = URL.createObjectURL(blob)
-  link.download = `forecast_${years.value}_${selectedClass.value}.csv`
+  link.download = `机队结构预测_${years.value}_${selectedClass.value}.csv`
   link.click()
   URL.revokeObjectURL(link.href)
 }
@@ -638,7 +637,7 @@ watch(selectedClass, () => {
   border-radius: 6px;
   box-shadow: 0 1px 6px rgb(0 0 0 / 0.1);
   overflow: hidden;
-  height: 100%;   /* 与右侧对齐 */
+  max-height: 690px
 }
 
 /* 表格视图外层 */
@@ -760,34 +759,25 @@ watch(selectedClass, () => {
   align-items: center;
 }
 
-/* 视图切换框右对齐 */
-.select-align-right {
+/* 右侧按钮区域整体右对齐 + 等间距 8px */
+.actions-right {
   display: flex;
-  justify-content: flex-end; /* 关键：右对齐 */
-}
-
-.select-right-wrapper {
-  width: 100%;
-  display: flex;
-  justify-content: flex-end; /* 保证内部控件也靠右 */
-}
-
-/* 按钮右对齐布局 */
-.controls-actions {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.controls-actions-inner {
-  display: flex;
-  gap: 12px;
   justify-content: flex-end;
   width: 100%;
 }
 
-/* 保证按钮高度一致 */
-.controls-actions-inner .el-button {
-  min-width: 130px;
+.actions-right-inner {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px; /* 控件之间的间距 8px */
+  width: 100%;
+}
+
+/* 保证下拉框与按钮高度一致 */
+.actions-right-inner .el-select,
+.actions-right-inner .el-button {
+  height: 32px;
 }
 
 /* ========== 响应式 ========== */

@@ -168,10 +168,12 @@ import * as XLSX from 'xlsx'
 const updateDialogVisible = ref(false)
 const updateLogs = ref([])
 const canUpdate = ref(false)
+
 const HistoryDialog = () => {
   updateDialogVisible.value = true
   loadUpdateStatus()
 }
+
 const loadUpdateStatus = async () => {
   try {
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.LOGS)
@@ -183,14 +185,16 @@ const loadUpdateStatus = async () => {
     }
   } catch (err) { console.error('加载更新记录失败:', err) }
 }
+
 const doUpdate = async () => {
   if (!canUpdate.value) return
   try {
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPDATE_ALL)
     const res = await axios.post(url)
-    if (res.data?.success) {
+    console.log('更新响应:', res.data)
+    if (res.data.code === 200) {
       ElMessage.success('更新已开始')
-      updateDialogVisible.value = false
+      loadUpdateStatus()
     }
   } catch (err) {
     ElMessage.error('更新失败')
@@ -421,7 +425,7 @@ function exportData() {
     const ws = XLSX.utils.aoa_to_sheet(aoa)
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'forecast')
-    XLSX.writeFile(wb, `forecast_export_${granularity.value}_${years.value}y_${Date.now()}.xlsx`)
+    XLSX.writeFile(wb, `ASK预测_${granularity.value}_${years.value}y_${Date.now()}.xlsx`)
     ElMessage.success('导出成功')
   } catch (e) {
     console.error('导出失败', e)
@@ -679,44 +683,47 @@ watch(viewMode, (v) => {
   flex-direction: column;
 }
 
-/* Table wrapper */
+/* 外层容器：让它成为真正的显示框 */
 .table-wrap {
-  /* 保持固定高度，提供滚动容器 */
-  max-height: 800px;  /* 或你想要的高度 */
-  overflow-y: auto;
-  margin-bottom: 0;
+  height: 100%;    
+  max-height: 700px;
+  min-height: 660px;
+  overflow: hidden; 
   background: #fff;
   border-radius: 6px;
-  padding: 8px;
+  padding: 0;  
   box-shadow: 0 1px 6px rgba(0,0,0,0.04);
-  box-sizing: border-box;
-  /* 确保宽度100% */
   width: 100%;
   display: flex;
   flex-direction: column;
 }
 
+/* 中间层让表格吃满可用空间 */
 .table-inner {
-  /* 让inner撑满table-wrap高度 */
-  min-width: 100%;
-  /* 取消原来的overflow-x，防止双滚动 */
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow-y: auto;
   overflow-x: auto;
-  overflow-y: unset;
-  /* 让高度自适应或填满 */
-  flex: 1 1 auto;
-  white-space: nowrap;
+  box-sizing: border-box;
 }
 
-/* 表格最大高度限制，内部滚动 */
+/* 表格必须强制填满容器 */
+.table-inner .el-table {
+  height: 100% !important;
+  width: 100%;
+}
+
+/* 去掉 el-table 自带 margin/padding */
 .el-table {
-  max-height: 800px !important;
+  margin: 0 !important;
 }
 
 /* Chart container */
 .chart-area {
   flex: 1 1 auto;
   min-height: 360px;
-  max-height: 800px;
+  max-height: 700px;
   background: #fff;
   border-radius: 6px;
   padding: 8px;
