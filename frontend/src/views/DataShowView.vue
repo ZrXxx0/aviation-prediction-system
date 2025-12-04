@@ -40,7 +40,7 @@
 
         <el-col :span="2" class="btn-col">
           <!-- 点击加载时使用内部静态数据假装后端返回；已保留注释的真实请求示例 -->
-          <el-button type="primary" @click="loadForecast" :loading="loading">加载</el-button>
+          <el-button type="primary" @click="loadForecast" :loading="loading">加载运力预测结果</el-button>
         </el-col>
       </el-row>
 

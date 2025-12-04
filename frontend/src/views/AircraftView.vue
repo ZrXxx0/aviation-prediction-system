@@ -705,7 +705,7 @@ watch(selectedClass, () => {
 .pie-chart {
   width: 100%;
   height: 420px; /* 更大的可视区域 */
-  margin-top: 12px;
+  margin-top: 6px;
 }
 
 .summary-card {
