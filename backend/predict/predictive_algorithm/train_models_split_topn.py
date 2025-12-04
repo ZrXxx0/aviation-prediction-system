@@ -19,7 +19,7 @@ from .TS_model import ARIMAModel
 from .model_evaluation import ModelEvaluator
 from .FeatureEngineer import DataPreprocessor, FeatureBuilder, AirlineRouteModel
 from .create_model import get_model
-from .filter_large_samples import filter_routes
+from .filter_large_samples import filter_routes,double_filter_routes
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -547,22 +547,12 @@ def process_all_routes(domestic, config):
         return
 
     # 1. 筛选航线
-    filter_mode = config.get("filter_mode", "top_n")
     top_n = config.get("top_n", 500)
 
-    if filter_mode == "top_n":
-        valid_routes, remaining_routes = filter_routes(
-            report_path=ROUTE_DATA_REPORT_PATH,
-            filter_mode='top_n',
-            top_n=top_n
-        )
-    else:
-        # 如果是 threshold 模式
-        valid_routes, remaining_routes = filter_routes(
-            min_ratio=config.get("min_valid_ratio", 0.8),
-            report_path=ROUTE_DATA_REPORT_PATH,
-            filter_mode='threshold'
-        )
+    valid_routes, remaining_routes = double_filter_routes(
+        report_path=ROUTE_DATA_REPORT_PATH,
+        top_n=top_n
+    )
 
     routes_list = list(valid_routes[['Origin', 'Destination']].itertuples(index=False, name=None))
 
