@@ -318,7 +318,7 @@ class FleetParam(models.Model):
     机型参数表：
     """
 
-    # 机型名作为主键，例如 “大型涡扇支线客机”
+    # 机型名作为主键，例如 “支线客机”
     fleet_type = models.CharField(
         "机型", max_length=50, primary_key=True
     )

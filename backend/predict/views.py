@@ -2638,7 +2638,7 @@ def get_fleet_params_ordered():
 # 获取映射μ
 FLEET_PROP_CSV = os.path.join(settings.BASE_DIR, "Predict_Datas", "fleet_proportions.csv")
 FLEET_COLS = [
-    "大型涡扇支线客机",
+    "支线客机",
     "小型窄体客机",
     "中型窄体客机",
     "大型窄体客机",
@@ -2651,7 +2651,7 @@ def load_fleet_mu_map():
     读取 fleet_proportions.csv，返回:
     {
       (origin, destination): {
-          "大型涡扇支线客机": μ1,
+          "支线客机": μ1,
           "小型窄体客机": μ2,
           ...
       },
@@ -2922,7 +2922,7 @@ def fleet_param_list_view(request):
       "success": true,
       "data": [
         {
-          "fleet_type": "大型涡扇支线客机",
+          "fleet_type": "支线客机",
           "avg_seats": 76.0,
           "avg_speed": 586.0,
           "avg_uti": 8.8
@@ -2954,7 +2954,7 @@ def fleet_param_update_view(request):
     {
       "data": [
         {
-          "fleet_type": "大型涡扇支线客机",
+          "fleet_type": "支线客机",
           "avg_seats": 76.0,
           "avg_speed": 586.0,
           "avg_uti": 8.8
