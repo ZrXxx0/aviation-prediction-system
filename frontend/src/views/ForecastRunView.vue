@@ -92,17 +92,31 @@
 
         <!-- 右侧图表和结果 -->
         <div class="result-area">
-          <div class="chart-header" style="display: flex; align-items: center; justify-content: space-between; padding-right: 10px;">
+          <div class="chart-header" 
+              style="display: flex; align-items: center; justify-content: space-between; padding-right: 10px;">
+            <!-- 左侧：显示历史数据 -->
             <el-checkbox v-model="showTrain">显示历史数据</el-checkbox>
-            <el-button 
-              type="primary" 
-              size="small" 
-              :disabled="!forecastResults.length || showProcessing" 
-              @click="updateForecastResult"
-            >
-              更新预测结果
-            </el-button>
+            <!-- 右侧：两个按钮并排 -->
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <el-button
+                type="success"
+                size="small"
+                :disabled="!forecastResults.length || showProcessing"
+                @click="exportForecastResult"
+              >
+                导出预测结果
+              </el-button>
+              <el-button 
+                type="primary" 
+                size="small" 
+                :disabled="!forecastResults.length || showProcessing" 
+                @click="updateForecastResult"
+              >
+                更新预测结果
+              </el-button>
+            </div>
           </div>
+
           <div class="chart-area" ref="chartRef"></div>
 
           <div class="stat-card">
@@ -685,6 +699,41 @@ function renderFromResults() {
 
   renderChart(xLabels, allSeries)
   performanceTable.value = performance
+}
+
+function exportForecastResult() {
+  if (!forecastResults.value.length) {
+    ElMessage.warning("暂无可导出的预测结果");
+    return;
+  }
+
+  let csvRows = [];
+  csvRows.push("origin_airport,destination_airport,model_type,time_point,prediction_value");
+
+  forecastResults.value.forEach(item => {
+    const { model_info, prediction_results } = item.data || {};
+    if (!prediction_results) return;
+
+    const { origin_airport, destination_airport, model_type } = model_info || {};
+    const future = prediction_results.future_predictions || [];
+
+    future.forEach(d => {
+      csvRows.push(
+        `${origin_airport},${destination_airport},${model_type},${d.time_point},${d.value}`
+      );
+    });
+  });
+
+  const blob = new Blob([csvRows.join("\n")], {
+    type: "text/csv;charset=utf-8;"
+  });
+
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.setAttribute("download", "future_predictions.csv");
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
 }
 
 async function updateForecastResult() {
