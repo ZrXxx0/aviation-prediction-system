@@ -118,11 +118,11 @@
             :on-change="handleFileChange"
             :file-list="fileList"
             :auto-upload="false"
-            accept=".csv"
+            accept=".csv,.xls,.xlsx"
             :disabled="showProcessing"
           >
-            <div class="el-upload__text">拖拽或点击上传CSV数据文件</div>
-            <div class="el-upload__tip">只能上传CSV格式文件，且不超过5MB</div>
+            <div class="el-upload__text">拖拽或点击上传CSV/Excel数据文件</div>
+            <div class="el-upload__tip">支持CSV、XLS、XLSX格式，且不超过10MB</div>
           </el-upload>
 
           <div v-if="previewData.length" class="preview-table">
@@ -297,6 +297,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Loading } from '@element-plus/icons-vue'
 import templateCsvUrl from '@/assets/data_template.csv?url'
+import * as XLSX from 'xlsx'
 import templatePdfUrl from '@/assets/模板说明.pdf?url'
 // import Papa from 'papaparse'
 
@@ -486,21 +487,22 @@ function exportData() {
   URL.revokeObjectURL(link.href)
 }
 
-/* --- CSV 上传 --- */
+/* --- CSV/Excel 上传 --- */
 const fileList = ref([])
 const previewData = ref([])
 const previewColumns = ref([])
+const uploadedFile = ref(null)
 let uploadedFileContent = ''
 
 function beforeUpload(file) {
-  const isCSV = file.name.endsWith('.csv')
-  const isLt5M = file.size / 1024 / 1024 < 5
-  if (!isCSV) {
-    ElMessage.error('只能上传CSV文件')
+  const isSupported = /\.(csv|xls|xlsx)$/i.test(file.name)
+  const isLt5M = file.size / 1024 / 1024 < 10
+  if (!isSupported) {
+    ElMessage.error('仅支持 CSV / XLS / XLSX 文件')
     return false
   }
   if (!isLt5M) {
-    ElMessage.error('文件大小不能超过5MB')
+    ElMessage.error('文件大小不能超过10')
     return false
   }
   return true
@@ -508,19 +510,37 @@ function beforeUpload(file) {
 
 function handleFileChange(file, list) {
   fileList.value = list
+  uploadedFile.value = file.raw || null
+  uploadedFileContent = ''
+  previewColumns.value = []
+  previewData.value = []
   if (!file.raw) return
 
+  const isExcel = /\.(xls|xlsx)$/i.test(file.name)
   const reader = new FileReader()
   reader.onload = e => {
-    uploadedFileContent = e.target.result
-
-    // 调用自定义 CSV 解析函数
-    const { headers, rows } = parseCSV(uploadedFileContent)
-
-    previewColumns.value = headers
-    previewData.value = rows.slice(0, 10) // 预览前 10 行
+    if (isExcel) {
+      try {
+        const workbook = XLSX.read(e.target.result, { type: 'array' })
+        const firstSheetName = workbook.SheetNames[0]
+        const sheet = workbook.Sheets[firstSheetName]
+        const jsonData = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+        previewColumns.value = jsonData.length ? Object.keys(jsonData[0]) : []
+        previewData.value = jsonData.slice(0, 10)
+        uploadedFileContent = XLSX.utils.sheet_to_csv(sheet)
+      } catch (err) {
+        console.error(err)
+        ElMessage.error('Excel 文件解析失败')
+      }
+    } else {
+      uploadedFileContent = e.target.result
+      const { headers, rows } = parseCSV(uploadedFileContent)
+      previewColumns.value = headers
+      previewData.value = rows.slice(0, 10) // 预览前 10 行
+    }
   }
-  reader.readAsText(file.raw, 'utf-8')
+  if (isExcel) reader.readAsArrayBuffer(file.raw)
+  else reader.readAsText(file.raw, 'utf-8')
 }
 
 function parseCSV(csvText) {
@@ -574,15 +594,25 @@ function parseCSV(csvText) {
 
 
 async function uploadData() {
-  if (!uploadedFileContent) return ElMessage.warning('请先选择CSV文件')
+  if (!uploadedFile.value && !uploadedFileContent) return ElMessage.warning('请先选择CSV或Excel文件')
   showProcessing.value = true
   try {
-    // 暂无接口
-    const res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_CHECK), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: uploadedFileContent })
-    })
+    const hasFile = !!uploadedFile.value
+    let res
+    if (hasFile) {
+      const formData = new FormData()
+      formData.append('file', uploadedFile.value)
+      res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_CHECK), {
+        method: 'POST',
+        body: formData
+      })
+    } else {
+      res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_CHECK), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: uploadedFileContent })
+      })
+    }
     const result = await res.json()
     showProcessing.value = false
 
@@ -620,12 +650,22 @@ async function confirmUpload() {
   confirmUploadDialog.value = false
   showProcessing.value = true
   try {
-    // 暂无接口
-    const res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_INSERT), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ content: uploadedFileContent })
-    })
+    const hasFile = !!uploadedFile.value
+    let res
+    if (hasFile) {
+      const formData = new FormData()
+      formData.append('file', uploadedFile.value)
+      res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_INSERT), {
+        method: 'POST',
+        body: formData
+      })
+    } else {
+      res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_INSERT), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: uploadedFileContent })
+      })
+    }
     const result = await res.json()
     showProcessing.value = false
     if (result.success) {
@@ -633,6 +673,8 @@ async function confirmUpload() {
       fileList.value = []
       previewData.value = []
       previewColumns.value = []
+      uploadedFile.value = null
+      uploadedFileContent = ''
     } else ElMessage.error('数据插入失败')
   } catch {
     showProcessing.value = false
@@ -786,14 +828,27 @@ async function submitConflictResolution() {
   conflictDialog.value = false
   showProcessing.value = true
   try {
-    const res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_RESOLVE), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        decisions: userDecisions,
-        content: uploadedFileContent  // 发送完整的 CSV 内容
+    const hasFile = !!uploadedFile.value
+    let res
+    if (hasFile) {
+      const formData = new FormData()
+      formData.append('decisions', JSON.stringify(userDecisions))
+      formData.append('file', uploadedFile.value)
+      if (uploadedFileContent) formData.append('content', uploadedFileContent)
+      res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_RESOLVE), {
+        method: 'POST',
+        body: formData
       })
-    })
+    } else {
+      res = await fetch(apiConfig.getUrl(apiConfig.endpoints.PREDICT.UPLOAD_RESOLVE), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          decisions: userDecisions,
+          content: uploadedFileContent  // 发送完整的 CSV/Excel 内容
+        })
+      })
+    }
     const result = await res.json()
     showProcessing.value = false
     if (result.success) {
@@ -801,6 +856,7 @@ async function submitConflictResolution() {
       fileList.value = []
       previewData.value = []
       previewColumns.value = []
+      uploadedFile.value = null
       uploadedFileContent = ''
     } else ElMessage.error(result.message || '冲突处理失败')
   } catch (err) {

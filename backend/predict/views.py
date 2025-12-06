@@ -1421,11 +1421,10 @@ def download_train_file(request):
         }, status=500)
 
 
-# views_flight_api.py
-
 import decimal
 from django.db import transaction
-from .utils_flight_import import parse_upload_file_for_preview, parse_csv_content
+from .predictive_algorithm.utils_flight_import import parse_upload_file_for_preview, parse_csv_content
+
 
 def _to_decimal_or_none(v):
     if v in (None, "", "null"):
@@ -1617,49 +1616,75 @@ def flight_market_upload_commit(request):
     })
 
 
-# 前端上传接口（适配前端 CSV 文本格式）
+# 前端上传接口（适配前端 CSV 文本格式，同时支持上传 Excel 文件）
 @api_view(['POST'])
 @csrf_exempt
 def upload_check(request):
     """
     检查上传数据，返回冲突信息
-    请求体: { "content": "CSV文本内容" }
+    请求体:
+    - JSON: { "content": "CSV文本内容" }
+    - multipart/form-data: file=上传的 csv/xlsx/xls
     返回:
     - status: 1=无冲突可上传, 2=有冲突需处理, 3=格式错误
     - conflicts: 冲突列表（status=2时）
     """
     try:
-        data = json.loads(request.body)
-        csv_content = data.get('content', '')
-        
-        if not csv_content:
-            return JsonResponse({
-                'status': 3,
-                'message': '缺少 CSV 内容'
-            }, status=400)
-        
-        # 解析 CSV
-        try:
-            all_rows = parse_csv_content(csv_content)
-        except ValueError as e:
-            return JsonResponse({
-                'status': 3,
-                'message': str(e)
-            }, status=400)
-        except Exception as e:
-            return JsonResponse({
-                'status': 3,
-                'message': f'解析失败: {str(e)}'
-            }, status=400)
-        
+        upload_file = request.FILES.get('file')
+        if upload_file:
+            # 解析上传的 CSV/Excel 文件
+            try:
+                all_rows = parse_csv_content(file_obj=upload_file)
+            except ValueError as e:
+                import traceback
+                traceback.print_exc()
+                print(f"解析发生严重错误: {e}")
+                return JsonResponse({
+                    'status': 3,
+                    'message': str(e)
+                }, status=400)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"解析发生严重错误: {e}")
+                return JsonResponse({
+                    'status': 3,
+                    'message': f'解析失败: {str(e)}'
+                }, status=400)
+        else:
+            data = json.loads(request.body)
+            csv_content = data.get('content', '')
+            
+            if not csv_content:
+                return JsonResponse({
+                    'status': 3,
+                    'message': '缺少 CSV/Excel 内容'
+                }, status=400)
+            
+            # 解析 CSV 文本
+            try:
+                all_rows = parse_csv_content(csv_content=csv_content)
+            except ValueError as e:
+                return JsonResponse({
+                    'status': 3,
+                    'message': str(e)
+                }, status=400)
+            except Exception as e:
+                return JsonResponse({
+                    'status': 3,
+                    'message': f'解析失败: {str(e)}'
+                }, status=400)
+
         if not all_rows:
+            print("12345")
             return JsonResponse({
                 'status': 3,
-                'message': 'CSV 文件为空或格式不正确'
+                'message': '文件为空或格式不正确'
             }, status=400)
         
         # 检查冲突
         conflicts = []
+        print(123)
         for row in all_rows:
             if row['has_conflict']:
                 conflicts.append({
@@ -1698,32 +1723,45 @@ def upload_check(request):
 def upload_insert(request):
     """
     直接插入数据（无冲突时使用）
-    请求体: { "content": "CSV文本内容" }
+    请求体:
+    - JSON: { "content": "CSV文本内容" }
+    - multipart/form-data: file=上传的 csv/xlsx/xls
     返回: { "success": true/false }
     """
     try:
-        data = json.loads(request.body)
-        csv_content = data.get('content', '')
+        upload_file = request.FILES.get('file')
+        if upload_file:
+            # 解析上传的 CSV/Excel 文件
+            try:
+                all_rows = parse_csv_content(file_obj=upload_file)
+            except Exception as e:
+                return JsonResponse({
+                    'success': False,
+                    'message': f'解析失败: {str(e)}'
+                }, status=400)
+        else:
+            data = json.loads(request.body)
+            csv_content = data.get('content', '')
 
-        if not csv_content:
-            return JsonResponse({
-                'success': False,
-                'message': '缺少 CSV 内容'
-            }, status=400)
+            if not csv_content:
+                return JsonResponse({
+                    'success': False,
+                    'message': '缺少 CSV/Excel 内容'
+                }, status=400)
 
-        # 解析 CSV
-        try:
-            all_rows = parse_csv_content(csv_content)
-        except Exception as e:
-            return JsonResponse({
-                'success': False,
-                'message': f'解析失败: {str(e)}'
-            }, status=400)
+            # 解析 CSV 文本
+            try:
+                all_rows = parse_csv_content(csv_content=csv_content)
+            except Exception as e:
+                return JsonResponse({
+                    'success': False,
+                    'message': f'解析失败: {str(e)}'
+                }, status=400)
 
         if not all_rows:
             return JsonResponse({
                 'success': False,
-                'message': 'CSV 文件为空或格式不正确'
+                'message': '文件为空或格式不正确'
             }, status=400)
 
         # 检查是否有冲突（不应该有，但为了安全还是检查）
@@ -1799,14 +1837,31 @@ def upload_insert(request):
 def upload_resolve(request):
     """
     处理冲突数据
-    请求体: { "decisions": [{"key": "...", "action": "keep"/"replace"}, ...] }
-    注意：前端需要同时发送完整的 CSV 内容，以便获取新数据
+    请求体:
+    - JSON: { "decisions": [{"key": "...", "action": "keep"/"replace"}, ...], "content": "CSV文本内容" }
+    - multipart/form-data: file=上传的 csv/xlsx/xls, decisions=JSON 字符串, content 可选
+    注意：前端需要同时发送完整的 CSV/Excel 数据，以便获取新数据
     返回: { "success": true/false }
     """
     try:
-        data = json.loads(request.body)
-        decisions = data.get('decisions', [])
-        csv_content = data.get('content', '')  # 需要 CSV 内容来获取新数据
+        upload_file = request.FILES.get('file')
+        if upload_file:
+            decisions_raw = request.POST.get('decisions', '')
+            csv_content = request.POST.get('content', '')
+            if decisions_raw:
+                try:
+                    decisions = json.loads(decisions_raw)
+                except json.JSONDecodeError:
+                    return JsonResponse({
+                        'success': False,
+                        'message': 'decisions 需要是有效的 JSON 格式'
+                    }, status=400)
+            else:
+                decisions = []
+        else:
+            data = json.loads(request.body)
+            decisions = data.get('decisions', [])
+            csv_content = data.get('content', '')  # 需要 CSV/Excel 内容来获取新数据
         
         if not decisions:
             return JsonResponse({
@@ -1814,15 +1869,18 @@ def upload_resolve(request):
                 'message': '缺少处理决策'
             }, status=400)
         
-        if not csv_content:
+        if not upload_file and not csv_content:
             return JsonResponse({
                 'success': False,
-                'message': '缺少 CSV 内容'
+                'message': '缺少 CSV/Excel 内容'
             }, status=400)
         
-        # 解析 CSV 获取新数据
+        # 解析 CSV/Excel 获取新数据
         try:
-            all_rows = parse_csv_content(csv_content)
+            all_rows = parse_csv_content(
+                csv_content=csv_content if not upload_file else None,
+                file_obj=upload_file
+            )
         except Exception as e:
             return JsonResponse({
                 'success': False,
