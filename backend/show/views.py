@@ -549,8 +549,71 @@ def get_fleet_params_ordered():
           .order_by("avg_seats")
           .values_list("fleet_type", "avg_seats"))
 
-    # [("大型涡扇支线客机", 76), ("小型窄体客机", 117), ...]
+    # [("支线客机", 76), ("小型窄体客机", 117), ...]
     return OrderedDict(qs)
+
+import pandas as pd
+from django.conf import settings
+# 映射表 Excel 的路径
+EQUIPMENT_FLEET_XLSX = os.path.join(
+    settings.BASE_DIR, "Predict_Datas", "equipment_fleet_map.xlsx"
+)
+_equipment_fleet_map_cache = None
+
+#  机队分布统计（改为基于 equipment -> Excel 映射）
+def get_equipment_fleet_map():
+    """
+    从 Excel 文件中读取映射：
+    {
+        "equipment编号": "机型类别字符串",
+        ...
+    }
+    只读一次，后面都用内存缓存。
+    Excel 至少需要两列：equipment, fleet_type（列名按实际情况改）
+    """
+    global _equipment_fleet_map_cache
+    if _equipment_fleet_map_cache is not None:
+        return _equipment_fleet_map_cache
+
+    if not os.path.exists(EQUIPMENT_FLEET_XLSX):
+        # 文件不存在，可以选择抛异常或者返回空 dict
+        # 这里先返回空 dict，方便接口不直接炸掉
+        print(f"[get_equipment_fleet_map] 映射文件不存在: {EQUIPMENT_FLEET_XLSX}")
+        _equipment_fleet_map_cache = {}
+        return _equipment_fleet_map_cache
+
+    # 读取 Excel
+    try:
+        df = pd.read_excel(EQUIPMENT_FLEET_XLSX)  # 默认读第一个 sheet
+    except Exception as e:
+        print(f"[get_equipment_fleet_map] 读取 Excel 失败: {e}")
+        _equipment_fleet_map_cache = {}
+        return _equipment_fleet_map_cache
+
+    # 假设 Excel 里有两列：equipment, fleet_type
+    # 如果你的列名是中文，比如“机型编号”“机型类别”，把这里改成对应的列名即可
+    equipment_col = "equipment"
+    fleet_type_col = "fleet_type"
+
+    if equipment_col not in df.columns or fleet_type_col not in df.columns:
+        print(f"[get_equipment_fleet_map] Excel 中缺少列 {equipment_col} 或 {fleet_type_col}")
+        _equipment_fleet_map_cache = {}
+        return _equipment_fleet_map_cache
+
+    mapping = {}
+
+    for _, row in df.iterrows():
+        equipment = str(row[equipment_col]).strip() if not pd.isna(row[equipment_col]) else ""
+        fleet_type = str(row[fleet_type_col]).strip() if not pd.isna(row[fleet_type_col]) else ""
+
+        if not equipment or not fleet_type:
+            continue
+
+        mapping[equipment] = fleet_type
+
+    _equipment_fleet_map_cache = mapping
+    print(f"[get_equipment_fleet_map] 已从 Excel 加载 {len(mapping)} 条 equipment 映射")
+    return _equipment_fleet_map_cache
 # 机型数据统计接口
 @api_view(['GET'])
 def aircraft_data_view(request):
@@ -661,37 +724,36 @@ def aircraft_data_view(request):
     # 按航班数排序
     equipment_distribution.sort(key=lambda x: x['flights'], reverse=True)
 
-    # 2. 机队分布统计（基于平均座位数）
-    fleet_mapping = get_fleet_params_ordered()
-    # print(fleet_mapping)
+    # 2. 机队分布统计（改为基于 equipment -> Excel 映射）
+    equipment_fleet_map = get_equipment_fleet_map()
 
-    # 重新查询数据用于机队统计
+    # 重新查询数据用于机队统计，这次需要带上 equipment
     records_for_fleet = FlightMarketRecord.objects.filter(**filters).values(
-        'equipment_total_flights', 'equipment_total_seats'
+        'equipment', 'equipment_total_flights'
     )
 
     fleet_stats = {}
+
     for record in records_for_fleet:
         flights = float(record['equipment_total_flights'] or 0)
-        seats = float(record['equipment_total_seats'] or 0)
+        if flights <= 0:
+            continue
 
-        if flights > 0 and seats > 0:
-            avg_seats = seats / flights
+        equipment = (record.get('equipment') or "").strip()
+        if not equipment:
+            # 没有机型编号，跳过（也可以记 log）
+            continue
 
-            # 根据平均座位数确定机队类型
-            fleet_type = None
-            for fleet_name, threshold in fleet_mapping.items():
-                if avg_seats <= threshold:
-                    fleet_type = fleet_name
-                    break
+        # 用 Excel 映射表查机型类别
+        fleet_type = equipment_fleet_map.get(equipment)
+        if not fleet_type:
+            # 映射表里没有的机型，先跳过，避免影响比例（你也可以归到“其他机型”）
+            continue
 
-            # 如果超过最大阈值，归类为大型宽体客机
-            if fleet_type is None:
-                fleet_type = "大型宽体客机"
-
-            if fleet_type not in fleet_stats:
-                fleet_stats[fleet_type] = 0
-            fleet_stats[fleet_type] += flights
+        if fleet_type not in fleet_stats:
+            fleet_stats[fleet_type] = 0
+        # 这里依旧按航班数统计机队占比
+        fleet_stats[fleet_type] += flights
 
     # 构建机队分布数据
     fleet_distribution = []

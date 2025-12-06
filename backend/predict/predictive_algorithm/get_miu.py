@@ -1,19 +1,19 @@
 from django.conf import settings
 from collections import OrderedDict
 import datetime
-import os
 import csv
 from django.db.models import Q
-from collections import defaultdict
-import pandas as pd
 import django
 import sys
 
+from collections import defaultdict
+import os
+import pandas as pd
+from django.conf import settings
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'AirlinePredictSystem.settings')
-
-
 django.setup()
+from predict.models import FlightMarketRecord,FleetParam
 # 配置路径
 ROUTE_RANKING_CSV = os.path.join(
     settings.BASE_DIR, "Predict_Datas", "route_ranking.csv"
@@ -21,7 +21,70 @@ ROUTE_RANKING_CSV = os.path.join(
 ROUTE_RANKING_CSV2 = os.path.join(
     settings.BASE_DIR, "Predict_Datas", "route_panel_ranking.csv"
 )
-from predict.models import FlightMarketRecord,FleetParam
+
+
+# 映射表 Excel 的路径
+EQUIPMENT_FLEET_XLSX = os.path.join(
+    settings.BASE_DIR, "Predict_Datas", "equipment_fleet_map.xlsx"
+)
+
+# 全局缓存
+_equipment_fleet_map_cache = None
+
+
+def get_equipment_fleet_map():
+    """
+    从 Excel 文件中读取映射：
+    {
+        "equipment编号": "机型类别字符串",
+        ...
+    }
+    只读一次，后面都用内存缓存。
+    Excel 至少需要两列：equipment, fleet_type（列名按实际情况改）
+    """
+    global _equipment_fleet_map_cache
+    if _equipment_fleet_map_cache is not None:
+        return _equipment_fleet_map_cache
+
+    if not os.path.exists(EQUIPMENT_FLEET_XLSX):
+        # 文件不存在，可以选择抛异常或者返回空 dict
+        # 这里先返回空 dict，方便接口不直接炸掉
+        print(f"[get_equipment_fleet_map] 映射文件不存在: {EQUIPMENT_FLEET_XLSX}")
+        _equipment_fleet_map_cache = {}
+        return _equipment_fleet_map_cache
+
+    # 读取 Excel
+    try:
+        df = pd.read_excel(EQUIPMENT_FLEET_XLSX)  # 默认读第一个 sheet
+    except Exception as e:
+        print(f"[get_equipment_fleet_map] 读取 Excel 失败: {e}")
+        _equipment_fleet_map_cache = {}
+        return _equipment_fleet_map_cache
+
+    # 假设 Excel 里有两列：equipment, fleet_type
+    # 如果你的列名是中文，比如“机型编号”“机型类别”，把这里改成对应的列名即可
+    equipment_col = "equipment"
+    fleet_type_col = "fleet_type"
+
+    if equipment_col not in df.columns or fleet_type_col not in df.columns:
+        print(f"[get_equipment_fleet_map] Excel 中缺少列 {equipment_col} 或 {fleet_type_col}")
+        _equipment_fleet_map_cache = {}
+        return _equipment_fleet_map_cache
+
+    mapping = {}
+
+    for _, row in df.iterrows():
+        equipment = str(row[equipment_col]).strip() if not pd.isna(row[equipment_col]) else ""
+        fleet_type = str(row[fleet_type_col]).strip() if not pd.isna(row[fleet_type_col]) else ""
+
+        if not equipment or not fleet_type:
+            continue
+
+        mapping[equipment] = fleet_type
+
+    _equipment_fleet_map_cache = mapping
+    print(f"[get_equipment_fleet_map] 已从 Excel 加载 {len(mapping)} 条 equipment 映射")
+    return _equipment_fleet_map_cache
 
 def get_routes_from_csv(limit: int = None):
     """
@@ -65,26 +128,46 @@ def get_routes_from_csv(limit: int = None):
 
 
 def classify_fleet(records_for_fleet):
+    """
+    按 equipment -> EquipmentFleetMap.fleet_type 来分类，
+    然后统计每个机型类别的座位总数。
+    """
     fleet_stats = defaultdict(int)
+
+    # 一次拿到 equipment -> fleet_type 的映射
+    equipment_map = get_equipment_fleet_map()
+
     for record in records_for_fleet:
         flights = float(record.equipment_total_flights or 0)
         seats = float(record.equipment_total_seats or 0)
 
-        if flights > 0 and seats > 0:
-            avg_seats = seats / flights
-            fleet_type = None
+        # 你之前这里就用过这个判断，可以保留：无有效航班/座位就跳过
+        if flights <= 0 or seats <= 0:
+            continue
 
-            for fleet_name, threshold in fleet_mapping.items():
-                if avg_seats <= threshold:
-                    fleet_type = fleet_name
-                    break
+        # 读取 equipment 编号
+        equipment = (getattr(record, "equipment", "") or "").strip()
+        if not equipment:
+            # 没有 equipment 信息，直接跳过（也可以按需要记录 log）
+            continue
 
-            if fleet_type is None:
-                fleet_type = "大型宽体客机"
+        # 用新表来查所属机型类别
+        fleet_type = equipment_map.get(equipment)
 
-            fleet_stats[fleet_type] += seats
+        if not fleet_type:
+            # 映射表里没有这个 equipment，可以选择：
+            # 1) 归到某个“其他”类别：
+            #    fleet_type = "其他机型"
+            # 2) 或者干脆丢弃这部分：
+            #    continue
+            # 这里先选择丢弃，避免污染比例
+            continue
+
+        # 保留你原来的统计逻辑：不同类别累加 seats
+        fleet_stats[fleet_type] += seats
 
     return fleet_stats
+
 
 
 
@@ -100,7 +183,7 @@ def save_fleet_proportions_to_csv(fleet_proportions, filename="fleet_proportions
 
     header = [
         "origin", "destination",
-        "大型涡扇支线客机",
+        "支线客机",
         "小型窄体客机",
         "中型窄体客机",
         "大型窄体客机",
@@ -124,7 +207,7 @@ def get_fleet_mapping():
     """
     从 FleetParam 表中按座位数递增获取映射：
     {
-        "大型涡扇支线客机": 76,
+        "支线客机": 76,
         "小型窄体客机": 117,
         ...
     }
