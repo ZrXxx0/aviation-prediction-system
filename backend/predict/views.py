@@ -2418,13 +2418,16 @@ def forecast_panels_view(request):
             if p == "small":
                 # 小运力：直接用数据库中的汇总航线 other-other
                 routes = [("OTHER", "OTHER")]
+            elif p == "all":
+                # 全国：直接用数据库中的汇总航线 ALL-ALL
+                routes = [("ALL", "ALL")]
             else:
                 # large / medium 还是按 csv 来
                 routes = get_routes_from_csv(p)
 
             panel_routes[p] = routes
             all_routes.update(routes)
-
+        print(all_routes)
         # 如果一个航线都没有，就直接返回空结构
         if not all_routes:
             return JsonResponse(
