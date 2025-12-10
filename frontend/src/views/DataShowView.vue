@@ -219,7 +219,7 @@ const hasData = computed(() => Array.isArray(dataStore._prepared) && dataStore._
 /* ------------------ fetch / parse / prepare ------------------ */
 async function loadForecast() {
   if (!selectedClasses.value.length) {
-    ElMessage.warning('请选择至少一种统计对象（大/中/小）')
+    ElMessage.warning('请选择至少一种统计对象（大/中/小/全部）')
     return
   }
   loading.value = true
@@ -238,6 +238,7 @@ async function loadForecast() {
       },
       timeout: 60000
     })
+    console.log('后端返回数据:', res.data)
 
     if (!res.data.data || !res.data.data.panels) {
       throw new Error('后端返回数据格式错误：缺少 panels')
@@ -260,7 +261,7 @@ async function loadForecast() {
 }
 
 function parseBackend(resp) {
-  dataStore.large = dataStore.medium = dataStore.small = null
+  dataStore.large = dataStore.medium = dataStore.small = dataStore.all = null
   labels.value = []
   if (!resp) return
 
@@ -270,7 +271,7 @@ function parseBackend(resp) {
 
   const panels = resp.panels || {}
 
-  ;['large', 'medium', 'small'].forEach(cls => {
+  ;['large', 'medium', 'small', 'all'].forEach(cls => {
     const panel = panels[cls]
     if (!panel || !Array.isArray(panel.rows)) return
     const rows = panel.rows
@@ -311,6 +312,8 @@ function prepareVisualData() {
     combined = combined.concat(build(dataStore.medium, 'medium'))
   if (selectedClasses.value.includes('small'))
     combined = combined.concat(build(dataStore.small, 'small'))
+  if (selectedClasses.value.includes('all'))
+    combined = combined.concat(build(dataStore.all, 'all'))   // 修复：不再写成 dataStore.small
   dataStore._prepared = Array.isArray(combined) ? combined : []
 }
 
