@@ -2792,35 +2792,49 @@ def fleet_forecast_view(request):
                 status=400,
             )
 
-        # ------------ 5. 按年份从 ForecastYearly 查询 ASK（双向相加） ------------
+        # ------------ 5. 按年份从 ForecastYearly 查询 ASK（区分真实航线/ALL-ALL） ------------
         ModelCls = ForecastYearly
 
-        # 查询条件：每条航线的 OD / DO 都查出来
-        route_filter = Q()
-        for o, d in all_routes:
-            route_filter |= Q(origin=o, destination=d) | Q(origin=d, destination=o)
+        # 拆分真实航线和 ALL-ALL
+        all_all_flag = ("ALL", "ALL") in all_routes
+        real_routes = [r for r in all_routes if r != all_all_flag]
 
+        # 构建查询条件
+        route_filter = Q()
+        # 真实航线：双向查询
+        for o, d in real_routes:
+            route_filter |= Q(origin=o, destination=d) | Q(origin=d, destination=o)
+        # ALL-ALL：单向查询（无反向）+ 去重
+        if all_all_flag:
+            route_filter |= Q(origin="ALL", destination="ALL")
+
+        # 关键：添加distinct()避免查询结果重复（处理表中脏数据）
         qs = (
             ModelCls.objects.filter(route_filter, forecast_date__year=start_year)
             .values("origin", "destination", "ask")
+            .distinct()  # 新增：去重
         )
 
-        # 无向航线 key：(co, cd) -> ask_od + ask_do
+        # 构建 ASK 映射（区分真实航线/ALL-ALL）
         ask_map = {}
         for row in qs:
             o = row["origin"]
             d = row["destination"]
-            val = row["ask"]
-            val = float(val) if val is not None else 0.0
+            val = float(row["ask"]) if row["ask"] is not None else 0.0
 
-            # 规范化为无向航线 key，例如 SHA-PEK / PEK-SHA 都归一为 (SHA, PEK)
-            if o <= d:
-                co, cd = o, d
-            else:
-                co, cd = d, o
+            # 处理 ALL-ALL：直接赋值，不累加（避免重复）
+            if (o, d) == ("ALL", "ALL"):
+                ask_map[("ALL", "ALL")] = val
+                continue
 
-            key = (co, cd)
-            ask_map[key] = ask_map.get(key, 0.0) + val
+            # 处理真实航线：无向 key 累加
+            co, cd = (o, d) if o <= d else (d, o)
+            ask_map[(co, cd)] = ask_map.get((co, cd), 0.0) + val
+
+        # 补充：若 ALL-ALL 无记录，汇总所有真实航线的 ASK（正确汇总，无重复）
+        if all_all_flag and ask_map.get(("ALL", "ALL"), 0) == 0:
+            all_ask = sum(v for k, v in ask_map.items() if k != ("ALL", "ALL"))
+            ask_map[("ALL", "ALL")] = all_ask
 
         # ------------ 6. 最新一次成功预测时间 ------------
         last_log = ForecastUpdateLog.objects.filter(status=2).order_by("-created_at").first()
