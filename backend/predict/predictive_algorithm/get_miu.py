@@ -429,6 +429,13 @@ def get_miu_main(limit: int = None):
     # 全局统计（ALL -> ALL）
     global_fleet_stats = defaultdict(int)
 
+    # ===== 追加：Other-Other（排除前500条后，按航线等权平均）=====
+    EXCLUDE_TOP_N = 500
+    other_sum_props = defaultdict(float)
+    other_route_cnt = 0
+    other_fleet_keys = set()
+    # ===========================================================
+
     total_count = len(routes)
 
     for idx, (origin, destination) in enumerate(routes, 1):
@@ -451,6 +458,14 @@ def get_miu_main(limit: int = None):
             props = {k: v / total_f for k, v in current_stats.items()}
             fleet_proportions[(origin, destination)] = props
 
+            # ===== 追加：收集 Other-Other 的均值统计（不影响你原有 ALL-ALL）=====
+            if idx > EXCLUDE_TOP_N:
+                other_route_cnt += 1
+                other_fleet_keys.update(props.keys())
+                for k, v in props.items():
+                    other_sum_props[k] += v
+            # ====================================================================
+
         # 累加到全局统计
         for k, v in current_stats.items():
             global_fleet_stats[k] += v
@@ -461,8 +476,15 @@ def get_miu_main(limit: int = None):
         all_all_proportions = {k: v / total_all for k, v in global_fleet_stats.items()}
         fleet_proportions[("ALL", "ALL")] = all_all_proportions
 
+    # ===== 追加：写入 Other -> Other（等权平均，排除前500条）=====
+    if other_route_cnt > 0:
+        other_other_proportions = {k: other_sum_props[k] / other_route_cnt for k in other_fleet_keys}
+        fleet_proportions[("OTHER", "OTHER")] = other_other_proportions
+    # ===========================================================
+
     save_fleet_proportions_to_csv(fleet_proportions)
     print("数据已保存到 fleet_proportions.csv")
+
 
 if __name__ == "__main__":
     get_miu_main()
