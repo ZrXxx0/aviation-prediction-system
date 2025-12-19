@@ -2761,11 +2761,11 @@ def fleet_forecast_view(request):
         if not panel_types:
             panel_types = ["large"]  # 默认
 
-        valid_panels = {"large", "medium", "all"}
+        valid_panels = {"large", "medium", "all", "small"}
         panel_types = [p for p in panel_types if p in valid_panels]
         if not panel_types:
             return JsonResponse(
-                {"success": False, "error": "panels 必须是 large/medium/all"},
+                {"success": False, "error": "panels 必须是 large/medium/all/small"},
                 status=400,
             )
 
@@ -2776,6 +2776,9 @@ def fleet_forecast_view(request):
             if p == "all":
                 # all 面板：只返回 ALL-ALL 这一条
                 routes = [("ALL", "ALL")]
+            elif p == "small":
+                # 小运力：直接用数据库中的汇总航线 other-other
+                routes = [("OTHER", "OTHER")]
             else:
                 # large / medium 还是按 csv 来
                 routes = get_routes_from_csv(p)
