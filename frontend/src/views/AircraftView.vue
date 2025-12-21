@@ -22,8 +22,9 @@
             class="radio-group-flex"
             style="width:100%;"
           >
-            <el-radio label="large">大运量（100条）</el-radio>
-            <el-radio label="medium">中运量（400条）</el-radio>
+            <el-radio label="large">大运量(100条)</el-radio>
+            <el-radio label="medium">中运量(400条)</el-radio>
+            <el-radio label="small">小运量(加总)</el-radio>
             <el-radio label="all">全国</el-radio>
           </el-radio-group>
         </el-col>
@@ -269,8 +270,8 @@ const clearForecastData = () => {
   renderStackedChart(null)
 }
 
-const parsePanelData = (payload) => {
-  const key = selectedClass.value
+const parsePanelData = (payload, panelKey) => {
+  const key = panelKey || selectedClass.value
   const headers = payload?.panels?.[key]?.headers || []
   const rows = payload?.panels?.[key]?.rows || []
 
@@ -318,7 +319,9 @@ const loadForecast = async () => {
   loading.value = true
   try {
     const url = apiConfig.getUrl(apiConfig.endpoints.PREDICT.AIRCRAFTS)
-    const params = { year: years.value, panels: selectedClass.value }
+    // 小运量时传入 other-other
+    const panelParam = selectedClass.value === 'small' ? 'other-other' : selectedClass.value
+    const params = { year: years.value, panels: panelParam }
     console.log('请求预测数据参数:', params)
 
     const res = await axios.get(url, { params })
@@ -329,7 +332,7 @@ const loadForecast = async () => {
     }
 
     const payload = res.data.data || {}
-    const key = selectedClass.value
+    const key = panelParam  // 使用实际传入的参数作为key
 
     const headers = payload?.panels?.[key]?.headers || []
     const rows = payload?.panels?.[key]?.rows || []
@@ -339,7 +342,7 @@ const loadForecast = async () => {
       return
     }
 
-    const parsed = parsePanelData(payload)
+    const parsed = parsePanelData(payload, key)
     tableColumns.value = parsed.columns
     panelRows.value = parsed.rows
     total_count.value = parsed.rows.length
