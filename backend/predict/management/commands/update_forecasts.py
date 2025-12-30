@@ -42,6 +42,11 @@ class Command(BaseCommand):
         parser.add_argument('--max_workers', type=int, default=None, help="覆盖配置: 并行进程数")
         parser.add_argument('--lr_ratio', type=float, default=None, help="覆盖配置：趋势预测占比")
 
+        parser.add_argument('--del_yiqing', action='store_true', help="覆盖配置: 强制开启疫情数据剔除")
+        parser.add_argument('--no_del_yiqing', action='store_false', dest='del_yiqing',
+                            help="覆盖配置: 强制关闭疫情数据剔除")
+        parser.set_defaults(del_yiqing=None)
+
     def handle(self, *args, **options):
         # 0. 获取命令行参数
         top_n = options['top_n']
@@ -49,7 +54,6 @@ class Command(BaseCommand):
 
         self.stdout.write(self.style.SUCCESS(f"=== 开始全流程更新任务 (Top {top_n}) ==="))
 
-        # === 核心修复：动态更新 TRAIN_CONFIG ===
         # 必须显式修改导入的字典，才能让 process_all_routes 生效
         TRAIN_CONFIG['top_n'] = top_n
         TRAIN_CONFIG['filter_mode'] = 'top_n'  # 强制确保模式匹配
@@ -67,6 +71,8 @@ class Command(BaseCommand):
             TRAIN_CONFIG['max_workers'] = options['max_workers']
         if options['lr_ratio']:
             TRAIN_CONFIG['max_lr_ratio'] = options['lr_ratio']
+        if options['del_yiqing'] is not None:
+            TRAIN_CONFIG['del_yiqing'] = options['del_yiqing']
 
         self.stdout.write(f"当前运行配置: {TRAIN_CONFIG}")
 
@@ -167,8 +173,9 @@ class Command(BaseCommand):
 
     def generate_ranking_from_df(self, df, top_n):
         """
-        基于 DataFrame 生成排名
+        基于 DataFrame 生成排名 (修正版：按双向汇总排名)
         """
+        # 1. 预处理年份
         df['dt'] = pd.to_datetime(df['YearMonth'])
         df['year'] = df['dt'].dt.year
 
@@ -179,17 +186,42 @@ class Command(BaseCommand):
         merged = pd.merge(df, route_max_dates, on=['Origin', 'Destination'])
         target_data = merged[merged['year'] == merged['target_year']]
 
-        # 聚合
+        # 2. 统计单向数据
         stats = target_data.groupby(['Origin', 'Destination']).agg({
             'Route_Total_Seats': 'sum',
             'Distance (KM)': 'mean'
         }).reset_index()
 
+        # 计算单向的"价值" (ASK)
         stats['Calculated_Value'] = stats['Route_Total_Seats'] * stats['Distance (KM)']
-        stats = stats.sort_values(by='Calculated_Value', ascending=False)
 
-        top_routes = stats.head(top_n)[['Origin', 'Destination']].values.tolist()
-        return stats, top_routes
+        # ================= 修改开始 =================
+        # 3. 生成无向航线对标识 (Sort Origin/Dest to make A-B same as B-A)
+        # 使用 frozenset 或 tuple(sorted) 来创建统一的 Key
+        stats['Route_Pair'] = stats.apply(lambda x: tuple(sorted([x['Origin'], x['Destination']])), axis=1)
+
+        # 4. 按航线对聚合计算总价值
+        pair_stats = stats.groupby('Route_Pair')['Calculated_Value'].sum().reset_index()
+        pair_stats = pair_stats.rename(columns={'Calculated_Value': 'Pair_Total_Value'})
+
+        # 5. 对航线对进行排名，取 Top N
+        top_pairs_df = pair_stats.sort_values(by='Pair_Total_Value', ascending=False).head(top_n)
+        top_pairs_set = set(top_pairs_df['Route_Pair'])  # 拿到入选的 Top N 个无向对
+
+        # 6. 反向筛选：从原始 stats 中把属于这些 Pair 的单向航线都找出来
+        # 这样能保证 A->B 和 B->A 同时被选中（如果原始数据里都有的话）
+        final_stats = stats[stats['Route_Pair'].isin(top_pairs_set)].copy()
+
+        # 按单向价值降序排列一下，方便查看
+        final_stats = final_stats.sort_values(by='Calculated_Value', ascending=False)
+
+        # 提取最终要训练的单向列表
+        top_routes = final_stats[['Origin', 'Destination']].values.tolist()
+
+        self.stdout.write(f"排名逻辑修正：已选取 Top {top_n} 个双向航线对，共生成 {len(top_routes)} 条单向训练任务")
+
+        # 返回 final_stats (用于保存CSV) 和 top_routes (用于后续遍历)
+        return final_stats, top_routes
 
     def process_and_ingest(self, base_dir, top_routes):
         """
@@ -222,9 +254,8 @@ class Command(BaseCommand):
 
     def ingest_single_route(self, origin, dest, csv_path, is_other=False, history_csv_path=None):
         """
-        核心入库逻辑：
-        1. 读取 future_predictions.csv -> 存入 ForecastMonthly
-        2. 读取历史数据 (DB 或 csv) -> 拼接 -> Resample -> 存入 ForecastQuarterly/Yearly
+        核心入库逻辑：单向航线入库
+        Change: 现在返回 full_timeline (DataFrame) 用于 ALL-ALL 累加
         """
         try:
             # --- A. 读取预测数据 ---
@@ -234,21 +265,20 @@ class Command(BaseCommand):
             # 预测起始时间
             start_date = pred_df['YearMonth'].min()
 
+            # 兼容：计算 ASK
+            if 'Predicted_ASK' not in pred_df.columns:
+                # 防止由 Predicted_Seats * Distance 计算时出现缺失
+                pred_df['Predicted_ASK'] = pred_df['Predicted_Seats'] * pred_df.get('Distance', 0)
+
             # --- B. 更新月度预测表 (ForecastMonthly) ---
-            # 直接覆盖该航线 >= start_date 的数据
             monthly_objects = []
             for _, row in pred_df.iterrows():
-                # 兼容：有些文件可能有 Predicted_ASK，有些可能需要算
-                seats = row.get('Predicted_Seats', 0)
-                dist = row.get('Distance', 0)
-                ask = row.get('Predicted_ASK', seats * dist)
-
                 monthly_objects.append(ForecastMonthly(
                     origin=origin,
                     destination=dest,
                     forecast_date=row['YearMonth'],
-                    seats=seats,
-                    ask=ask
+                    seats=row['Predicted_Seats'],
+                    ask=row['Predicted_ASK']
                 ))
 
             with transaction.atomic():
@@ -258,10 +288,8 @@ class Command(BaseCommand):
                 ForecastMonthly.objects.bulk_create(monthly_objects)
 
             # --- C. 准备聚合数据 (拼接 历史 + 预测) ---
-            # 目的是为了计算出完整的季度/年度数值，因为单纯的预测数据可能从季度中间开始
-
             current_year = start_date.year
-            history_start_date = datetime(current_year, 1, 1).date()  # 从当年年初开始补齐
+            history_start_date = datetime(current_year, 1, 1).date()
 
             if not is_other:
                 # 常规航线：从 DB 读取历史真实值
@@ -280,21 +308,22 @@ class Command(BaseCommand):
                         'distance_km': 'Distance'
                     })
                     history_df['YearMonth'] = pd.to_datetime(history_df['YearMonth'])
-                    history_df['ASK'] = history_df['Seats'] * pd.to_numeric(history_df['Distance'])
+                    # 确保数值类型
+                    history_df['Seats'] = pd.to_numeric(history_df['Seats']).fillna(0)
+                    history_df['Distance'] = pd.to_numeric(history_df['Distance']).fillna(0)
+                    history_df['ASK'] = history_df['Seats'] * history_df['Distance']
                 else:
                     history_df = pd.DataFrame(columns=['YearMonth', 'Seats', 'ASK'])
             else:
-                # Other 航线：尝试读取 CSV 历史 (因为 DB 里可能没有聚合好的 Other 记录)
+                # Other 航线：尝试读取 CSV 历史
                 if history_csv_path and os.path.exists(history_csv_path):
                     try:
                         history_df = pd.read_csv(history_csv_path)
                         history_df['YearMonth'] = pd.to_datetime(history_df['YearMonth'])
                         history_df['Seats'] = 0  # Other 只有 ASK
-                        # 确保列名
                         if 'ASK' not in history_df.columns and 'Predicted_ASK' in history_df.columns:
                             history_df = history_df.rename(columns={'Predicted_ASK': 'ASK'})
 
-                        # 截取当年年初到预测开始前的数据
                         history_df = history_df[
                             (history_df['YearMonth'] >= pd.Timestamp(history_start_date)) &
                             (history_df['YearMonth'] < start_date)
@@ -304,7 +333,7 @@ class Command(BaseCommand):
                 else:
                     history_df = pd.DataFrame(columns=['YearMonth', 'Seats', 'ASK'])
 
-            # 统一预测数据的列名以便拼接
+            # 统一列名
             pred_clean = pred_df[['YearMonth', 'Predicted_Seats', 'Predicted_ASK']].rename(
                 columns={'Predicted_Seats': 'Seats', 'Predicted_ASK': 'ASK'}
             )
@@ -313,18 +342,17 @@ class Command(BaseCommand):
             full_timeline = pd.concat([history_df[['YearMonth', 'Seats', 'ASK']], pred_clean], axis=0)
 
             if full_timeline.empty:
-                return
+                return None
 
+            full_timeline = full_timeline.groupby('YearMonth')[['Seats', 'ASK']].sum().reset_index()
             full_timeline = full_timeline.sort_values('YearMonth').set_index('YearMonth')
+            full_timeline = full_timeline[['Seats', 'ASK']].fillna(0)  # 确保只返回数值列
 
             # --- D. 季度聚合入库 (ForecastQuarterly) ---
             quarterly_df = full_timeline.resample('QS').sum()
-
-            # 过滤掉早于预测开始那个季度的旧数据 (只存未来的/包含预测部分的)
             q_start_limit = pd.Timestamp(start_date).to_period('Q').start_time
             quarterly_df = quarterly_df[quarterly_df.index >= q_start_limit]
 
-            # 剔除末尾不完整季度
             last_date = full_timeline.index.max()
             if last_date.month not in [3, 6, 9, 12]:
                 quarterly_df = quarterly_df.iloc[:-1]
@@ -333,116 +361,116 @@ class Command(BaseCommand):
 
             # --- E. 年度聚合入库 (ForecastYearly) ---
             yearly_df = full_timeline.resample('YS').sum()
-
             y_start_limit = pd.Timestamp(start_date).to_period('Y').start_time
             yearly_df = yearly_df[yearly_df.index >= y_start_limit]
 
-            # 剔除末尾不完整年份
             if last_date.month != 12:
                 yearly_df = yearly_df.iloc[:-1]
 
             self.save_aggregated(ForecastYearly, yearly_df, origin, dest)
 
+            # === [关键修改] 返回完整时间线供 ALL-ALL 累加 ===
+            return full_timeline
+
         except Exception as e:
             self.stdout.write(self.style.ERROR(f"处理航线 {origin}-{dest} 入库失败: {e}"))
+            import traceback
+            traceback.print_exc()
+            return None
 
-    def process_and_ingest_aggregated(self, results_dir, top_routes_hint):
+    def process_and_ingest_aggregated(self, results_dir, top_routes_list):
         """
-        核心逻辑：
-        1. 扫描结果目录，识别所有的航线。
-        2. 按无向对 (A, B) 归组。
-        3. 对每一组，读取 A->B 和 B->A 的预测文件，相加。
-        4. 对每一组，读取数据库的历史数据，相加。
-        5. 拼接并入库。
+        逻辑修改：
+        1. 遍历 top_routes_list (约1000条单向)，逐个入库。
+        2. 处理 OTHER。
+        3. 累加所有数据生成 ALL-ALL。
+        最终结果数量 = TopN(单向) + 1(Other) + 1(All)
         """
 
-        # 1. 构建无向航线映射表
-        # pair_map 结构: { ('PEK', 'SZX'): [('PEK', 'SZX'), ('SZX', 'PEK')] }
-        pair_map = {}
+        grand_total_df = pd.DataFrame()
+        processed_count = 0
 
-        # 遍历结果目录下的所有文件夹，找出真正生成了预测的航线
-        all_folders = [f for f in os.listdir(results_dir) if os.path.isdir(os.path.join(results_dir, f))]
+        self.stdout.write(f"开始处理入库：预计处理 {len(top_routes_list)} 条单向航线 + Other + All")
 
-        for folder in all_folders:
-            if folder == 'OTHER_OTHER':
-                continue
+        # 1. 处理 Top N 单向航线
+        for origin, dest in top_routes_list:
+            folder_name = f"{origin}_{dest}"
+            pred_file = os.path.join(results_dir, folder_name, 'future_predictions.csv')
 
-            try:
-                origin, dest = folder.split('_')
-                # 按字母顺序排序，确保唯一Key
-                sorted_key = tuple(sorted([origin, dest]))
+            if os.path.exists(pred_file):
+                # 调用单条入库，并获取返回的数据
+                route_df = self.ingest_single_route(origin, dest, pred_file)
 
-                if sorted_key not in pair_map:
-                    pair_map[sorted_key] = []
+                # 累加到 ALL-ALL
+                if route_df is not None and not route_df.empty:
+                    if grand_total_df.empty:
+                        grand_total_df = route_df.copy()
+                    else:
+                        # fill_value=0 保证日期对齐，若某日期缺失则视为0
+                        grand_total_df = grand_total_df.add(route_df, fill_value=0)
 
-                pair_map[sorted_key].append((origin, dest))
-            except ValueError:
-                continue
+                processed_count += 1
+                if processed_count % 100 == 0:
+                    self.stdout.write(f"已处理 {processed_count} 条航线...")
+            else:
+                # 可能是由于数据过滤导致该方向被剔除，属正常现象
+                pass
 
-        self.stdout.write(f"识别到 {len(pair_map)} 个无向航线对 (Top N) 准备聚合入库")
-
-        # 2. 处理 Top N 聚合入库
-        count = 0
-        for (sorted_origin, sorted_dest), direction_list in pair_map.items():
-            self.ingest_aggregated_pair(
-                results_dir,
-                target_origin=sorted_origin,
-                target_dest=sorted_dest,
-                direction_list=direction_list
-            )
-            count += 1
-            if count % 50 == 0:
-                self.stdout.write(f"已处理 {count} / {len(pair_map)} 个聚合航线")
-
-        # 3. 处理 Other 航线
+        # 2. 处理 Other 航线
         other_pred_path = os.path.join(results_dir, 'OTHER_OTHER', 'future_predictions.csv')
         other_hist_path = os.path.join(results_dir, 'OTHER_OTHER', 'history_ask.csv')
 
         if os.path.exists(other_pred_path):
-            self.stdout.write("正在处理 Other-Other 聚合航线...")
-            # Other 不需要方向聚合，直接调用单条处理逻辑的变体，或者复用聚合逻辑(directions=[])
-            self.ingest_aggregated_pair(
-                results_dir,
-                target_origin='OTHER',
-                target_dest='OTHER',
-                direction_list=[],  # 特殊标记
-                is_other=True
+            self.stdout.write("正在处理 Other-Other 航线...")
+            other_df = self.ingest_single_route(
+                'OTHER', 'OTHER',
+                other_pred_path,
+                is_other=True,
+                history_csv_path=other_hist_path
             )
+
+            # 累加 Other 到 ALL-ALL
+            if other_df is not None and not other_df.empty:
+                if grand_total_df.empty:
+                    grand_total_df = other_df.copy()
+                else:
+                    grand_total_df = grand_total_df.add(other_df, fill_value=0)
+
+        # 3. 处理并入库 ALL-ALL
+        if not grand_total_df.empty:
+            self.stdout.write(self.style.SUCCESS("正在生成并入库 ALL-ALL 全市场数据..."))
+            self.ingest_all_all(grand_total_df)
+        else:
+            self.stdout.write(self.style.WARNING("未生成任何数据，无法计算 ALL-ALL"))
+
+        self.stdout.write(self.style.SUCCESS(f"入库完成。共处理单向航线: {processed_count}, 包含Other和All。"))
 
     def ingest_aggregated_pair(self, results_dir, target_origin, target_dest, direction_list, is_other=False):
         """
         聚合单个航线对并入库
-        :param target_origin: 存入数据库的 Origin (通常是字母序小的)
-        :param target_dest: 存入数据库的 Dest
-        :param direction_list: 包含实际存在的方向 [('PEK', 'SZX'), ('SZX', 'PEK')]
+        :return: full_timeline (DataFrame) or None. 返回该航线完整的历史+预测数据供累加使用
         """
         try:
             # --- A. 聚合预测数据 (Future) ---
             combined_pred_df = pd.DataFrame()
 
             if is_other:
-                # Other 特殊处理
                 pred_path = os.path.join(results_dir, 'OTHER_OTHER', 'future_predictions.csv')
                 if os.path.exists(pred_path):
                     df = pd.read_csv(pred_path)
                     df['YearMonth'] = pd.to_datetime(df['YearMonth'])
                     df = df.set_index('YearMonth')
                     combined_pred_df = df[['Predicted_Seats', 'Predicted_ASK']].fillna(0)
-                    # 重命名以统一
                     combined_pred_df.rename(columns={'Predicted_Seats': 'Seats', 'Predicted_ASK': 'ASK'}, inplace=True)
             else:
-                # 常规航线：遍历方向并相加
                 for org, dst in direction_list:
                     csv_path = os.path.join(results_dir, f"{org}_{dst}", "future_predictions.csv")
                     if os.path.exists(csv_path):
                         df = pd.read_csv(csv_path)
                         df['YearMonth'] = pd.to_datetime(df['YearMonth'])
                         df = df.set_index('YearMonth')
-
-                        # 确保列存在
                         if 'Predicted_ASK' not in df.columns:
                             df['Predicted_ASK'] = df['Predicted_Seats'] * df['Distance']
-
                         cols_to_sum = df[['Predicted_Seats', 'Predicted_ASK']].rename(
                             columns={'Predicted_Seats': 'Seats', 'Predicted_ASK': 'ASK'}
                         ).fillna(0)
@@ -450,17 +478,14 @@ class Command(BaseCommand):
                         if combined_pred_df.empty:
                             combined_pred_df = cols_to_sum
                         else:
-                            # 关键：按索引(日期)对齐相加
                             combined_pred_df = combined_pred_df.add(cols_to_sum, fill_value=0)
 
             if combined_pred_df.empty:
-                return
+                return None
 
-            # 预测数据的起始时间
             pred_start_date = combined_pred_df.index.min()
 
             # --- B. 更新月度预测表 (ForecastMonthly) ---
-            # 存入数据库
             monthly_objects = []
             for date_idx, row in combined_pred_df.iterrows():
                 monthly_objects.append(ForecastMonthly(
@@ -472,22 +497,17 @@ class Command(BaseCommand):
                 ))
 
             with transaction.atomic():
-                # 清除旧数据 (按聚合后的 Key)
                 ForecastMonthly.objects.filter(
                     origin=target_origin, destination=target_dest, forecast_date__gte=pred_start_date
                 ).delete()
                 ForecastMonthly.objects.bulk_create(monthly_objects)
 
             # --- C. 聚合历史数据 (History) ---
-            # 为了计算季度/年度，我们需要把历史数据也聚合起来
-
             current_year = pred_start_date.year
             history_start_date = datetime(current_year, 1, 1).date()
-
             combined_history_df = pd.DataFrame()
 
             if is_other:
-                # Other 历史来自 csv
                 hist_path = os.path.join(results_dir, 'OTHER_OTHER', 'history_ask.csv')
                 if os.path.exists(hist_path):
                     h_df = pd.read_csv(hist_path)
@@ -495,16 +515,11 @@ class Command(BaseCommand):
                     h_df = h_df[
                         (h_df['YearMonth'] >= pd.Timestamp(history_start_date)) & (h_df['YearMonth'] < pred_start_date)]
                     h_df = h_df.set_index('YearMonth')
-                    # Other 历史通常只有 ASK，Seats 设为 0
                     if 'ASK' not in h_df.columns and 'Predicted_ASK' in h_df.columns:
                         h_df.rename(columns={'Predicted_ASK': 'ASK'}, inplace=True)
                     h_df['Seats'] = 0
                     combined_history_df = h_df[['Seats', 'ASK']]
             else:
-                # 常规航线：从 DB 聚合两个方向的历史
-                # 构建 OR 查询条件
-                # 实际上直接分别查两次相加在逻辑上最简单清晰
-
                 for org, dst in direction_list:
                     qs = FlightMarketRecord.objects.filter(
                         origin=org,
@@ -520,7 +535,6 @@ class Command(BaseCommand):
                         df_hist['Seats'] = pd.to_numeric(df_hist['route_total_seats']).fillna(0).astype(int)
                         df_hist['ASK'] = (df_hist['Seats'] * pd.to_numeric(df_hist['distance_km']).fillna(0)).astype(
                             int)
-
                         cols = df_hist[['Seats', 'ASK']]
 
                         if combined_history_df.empty:
@@ -529,34 +543,123 @@ class Command(BaseCommand):
                             combined_history_df = combined_history_df.add(cols, fill_value=0)
 
             # --- D. 拼接并生成季度/年度数据 ---
-
-            # 统一列名
             combined_pred_df = combined_pred_df[['Seats', 'ASK']]
-
-            # 拼接 历史 + 预测
             full_timeline = pd.concat([combined_history_df, combined_pred_df], axis=0)
 
             if full_timeline.empty:
-                return
+                return None
 
             full_timeline = full_timeline.sort_index()
 
-            # 1. 季度聚合 (ForecastQuarterly)
+            # 1. 季度聚合
             quarterly_df = full_timeline.resample('QS').sum()
-            # 过滤掉旧数据
             q_start_limit = pd.Timestamp(pred_start_date).to_period('Q').start_time
             quarterly_df = quarterly_df[quarterly_df.index >= q_start_limit]
 
-            # 剔除末尾不完整季度
             last_date = full_timeline.index.max()
             if last_date.month not in [3, 6, 9, 12]:
                 quarterly_df = quarterly_df.iloc[:-1]
 
             self.save_aggregated(ForecastQuarterly, quarterly_df, target_origin, target_dest)
 
-            # 2. 年度聚合 (ForecastYearly)
+            # 2. 年度聚合
             yearly_df = full_timeline.resample('YS').sum()
             y_start_limit = pd.Timestamp(pred_start_date).to_period('Y').start_time
+            yearly_df = yearly_df[yearly_df.index >= y_start_limit]
+            if last_date.month != 12:
+                yearly_df = yearly_df.iloc[:-1]
+
+            self.save_aggregated(ForecastYearly, yearly_df, target_origin, target_dest)
+
+            # --- [新增] 返回 Full Timeline 供 ALL-ALL 累加 ---
+            return full_timeline
+
+        except Exception as e:
+            self.stdout.write(self.style.ERROR(f"处理聚合航线 {target_origin}-{target_dest} 失败: {e}"))
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def ingest_all_all(self, grand_total_df):
+        """
+        [新增] 专门处理 ALL-ALL 的入库逻辑
+        grand_total_df 包含所有的历史+预测数据
+        """
+        try:
+            target_origin = 'ALL'
+            target_dest = 'ALL'
+
+            grand_total_df = grand_total_df.sort_index()
+
+            # --- 1. 入库 ForecastMonthly (ALL-ALL) ---
+            # 只有预测部分入库到 Monthly 表？通常逻辑是这样。
+            # 我们需要推断预测开始时间。
+            # 这里简单处理：假设当前时间往后都是预测，或者根据最后一条数据倒推。
+            # 但更准确的是：grand_total_df 实际上包含了历史部分。
+            # Monthly 表通常我们希望展示完整的趋势，或者只展示预测。
+            # 既然之前的逻辑是 "ForecastMonthly 存 future_predictions"，那么我们这里也应该截取一下。
+            # 我们可以取当前月或下个月作为分界线，或者更简单的：
+            # 由于 grand_total_df 是 history + future 的累加，
+            # 我们很难精确知道“预测”是从哪一天开始的（因为不同航线可能稍微有点差异），
+            # 但通常都是统一的 current_date。
+            # 建议：直接将 grand_total_df 中最近的数据视为预测（例如最近12个月后的）。
+            # 或者更安全的方法：不做截断，全部存入？不，ForecastMonthly 定义通常是预测值。
+
+            # 稍微Hack一下：我们取所有列的非零值的点。
+            # 但实际上，为了保持一致性，我们可以假设只有未来的数据才写入 ForecastMonthly。
+            # 获取当前日期
+            now = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            # 假设预测是从下个月或者当月开始 (根据你的业务逻辑，通常是当前脚本运行时间)
+            # 这里我们保守一点，只存 `now` 之后的到 Monthly 表，或者存全部。
+            # **参照 ingest_aggregated_pair 的逻辑，它是只存 combined_pred_df**。
+            # 由于 grand_total_df 混在一起了，我们可以通过和数据库里最新的历史数据比对，
+            # 或者简单点：
+            # 直接把 grand_total_df 全部存进去？这样历史数据也会变成"预测"。
+            # 最好是：既然我们已经走到这一步，就假设 grand_total_df 的后半段是预测。
+
+            # 修正策略：在 ForecastMonthly 中，ALL-ALL 通常既需要看历史也需要看未来。
+            # 但如果表定义严格是 Forecast，那就只存未来。
+            # 让我们找一个 split point。通常是当前日期的下个月。
+            split_date = pd.Timestamp(now)
+
+            # 提取预测部分 (日期 >= split_date)
+            # 如果你的预测脚本是生成的未来20年，那肯定是从当前时间开始的。
+            pred_part = grand_total_df[grand_total_df.index >= split_date]
+
+            monthly_objects = []
+            for date_idx, row in pred_part.iterrows():
+                monthly_objects.append(ForecastMonthly(
+                    origin=target_origin,
+                    destination=target_dest,
+                    forecast_date=date_idx,
+                    seats=row['Seats'],
+                    ask=row['ASK']
+                ))
+
+            with transaction.atomic():
+                ForecastMonthly.objects.filter(
+                    origin=target_origin, destination=target_dest, forecast_date__gte=split_date
+                ).delete()
+                ForecastMonthly.objects.bulk_create(monthly_objects)
+
+            # --- 2. 入库 ForecastQuarterly (ALL-ALL) ---
+            quarterly_df = grand_total_df.resample('QS').sum()
+            # 存全部还是只存未来？ingest_aggregated_pair 里是有过滤 q_start_limit 的。
+            # 这里 ALL-ALL 我们通常希望能看到历史趋势对比，建议存多一点，或者保持一致只存未来。
+            # 保持一致性：只存 split_date 之后的季度
+            q_start_limit = split_date.to_period('Q').start_time
+            quarterly_df = quarterly_df[quarterly_df.index >= q_start_limit]
+
+            # 剔除末尾不完整
+            last_date = grand_total_df.index.max()
+            if last_date.month not in [3, 6, 9, 12]:
+                quarterly_df = quarterly_df.iloc[:-1]
+
+            self.save_aggregated(ForecastQuarterly, quarterly_df, target_origin, target_dest)
+
+            # --- 3. 入库 ForecastYearly (ALL-ALL) ---
+            yearly_df = grand_total_df.resample('YS').sum()
+            y_start_limit = split_date.to_period('Y').start_time
             yearly_df = yearly_df[yearly_df.index >= y_start_limit]
 
             if last_date.month != 12:
@@ -565,10 +668,9 @@ class Command(BaseCommand):
             self.save_aggregated(ForecastYearly, yearly_df, target_origin, target_dest)
 
         except Exception as e:
-            self.stdout.write(self.style.ERROR(f"处理聚合航线 {target_origin}-{target_dest} 失败: {e}"))
+            self.stdout.write(self.style.ERROR(f"ALL-ALL 入库失败: {e}"))
             import traceback
             traceback.print_exc()
-
 
     def save_aggregated(self, ModelClass, df, origin, dest):
         """

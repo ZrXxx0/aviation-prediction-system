@@ -39,7 +39,7 @@ CONFIG = {
     "time_granularity": "monthly",  # 时间粒度
     "add_ts_forecast": True,  # 是否添加时间序列特征
     "future_periods": 20*12,  # 预测时长
-    "max_workers": 18,  # 并行处理的最大进程数
+    "max_workers": 5,  # 并行处理的最大进程数
     "model_type": "lgb",  # 'lgb' 或 'xgb'
     "plot_results": False,  # 是否生成结果图表
     "save_data": False,  # 是否保存中间数据
@@ -47,7 +47,8 @@ CONFIG = {
     "min_valid_ratio": None,  # 最小有效比例阈值（filter_mode='threshold'时使用）
     "top_n": 500,  # 前n条航线数量（filter_mode='top_n'时使用）
     "include_other": True,  # 是否处理剩余航线作为"其他"航线
-    "max_lr_ratio":0.2
+    "max_lr_ratio":0.4,
+    "del_yiqing":True
 }
 
 ##################################    核心函数   ##################################
@@ -183,19 +184,27 @@ def process_other_routes_simple(remaining_routes, domestic, config, save_dir):
         # 1. 训练线性趋势模型
         ts_pre = ts_data.copy()
 
+        if config.get("del_yiqing", False):
+            # 保留 2020-01-01 之前 或 2022-12-31 之后的数据
+            mask = (ts_pre.index < pd.Timestamp('2020-01-01')) | (ts_pre.index > pd.Timestamp('2022-12-31'))
+            ts_trend_train = ts_pre[mask]
+            print(f"  -> 线性趋势模型已剔除疫情期间数据，剩余样本: {len(ts_trend_train)}")
+        else:
+            ts_trend_train = ts_pre
+
         trend_model = None
         has_trend = False
 
-        if len(ts_pre) >= 12:  # 至少有一年数据才拟合趋势
-            X_trend = np.array([t.toordinal() for t in ts_pre.index]).reshape(-1, 1)
-            y_trend = ts_pre.values
+        if len(ts_trend_train) >= 2:
+            X_trend = np.array([t.toordinal() for t in ts_trend_train.index]).reshape(-1, 1)
+            y_trend = ts_trend_train.values
 
             trend_model = LinearRegression()
             trend_model.fit(X_trend, y_trend)
             has_trend = True
             print(f"√ 成功拟合历史长期趋势 (R2: {trend_model.score(X_trend, y_trend):.4f})")
         else:
-            print("! 历史数据不足，仅使用 ARIMA")
+            print("! 历史数据不足(剔除疫情后)，仅使用 ARIMA")
 
         # 简单的 ARIMA 参数，对于这种聚合趋势通常 (1,1,1) 或 (5,1,0) 即可
         # 这里使用 (1,1,0) 加 季节性 或简单自回归，为了稳健使用 (1,1,1)
@@ -407,22 +416,32 @@ def process_single_route(route, domestic, config):
         trend_model = None
         has_trend_model = False
         trend_data = data_with_features_full.copy()
+
+        if config.get("del_yiqing", False):
+            # 使用 YearMonth 列进行筛选 (假设 route_processor.date_col 对应的是时间列，通常是 'YearMonth')
+            date_series = pd.to_datetime(trend_data[route_processor.date_col])
+            mask = (date_series < pd.Timestamp('2020-01-01')) | (date_series > pd.Timestamp('2022-12-31'))
+            trend_data_train = trend_data[mask].copy()
+            # print(f"  -> Debug: 剔除前 {len(trend_data)}, 剔除后 {len(trend_data_train)}")
+        else:
+            trend_data_train = trend_data
         
-        # 2. 只有当历史数据足够长(例如至少12个点)才训练趋势模型，否则只用机器学习模型
-        if len(trend_data) >= 12:
+        # 2. 只有当历史数据足够长(例如至少2个点)才训练趋势模型，否则只用机器学习模型
+        if len(trend_data_train) >= 2:
             try:
                 # 使用时间戳的 ordinal 作为特征 (简单的线性时间趋势 y = kt + b)
-                X_trend = trend_data[route_processor.date_col].map(pd.Timestamp.toordinal).values.reshape(-1, 1)
-                y_trend = trend_data['Route_Total_Seats'].values
+                X_trend = trend_data_train[route_processor.date_col].map(pd.Timestamp.toordinal).values.reshape(-1, 1)
+                y_trend = trend_data_train['Route_Total_Seats'].values
 
                 trend_model = LinearRegression()
                 trend_model.fit(X_trend, y_trend)
                 has_trend_model = True
-                print(f"  -> 已训练历史趋势模型 (样本数: {len(trend_data)})")
+                print(f"  -> 已训练历史趋势模型 (剔除疫情后样本数: {len(trend_data_train)})")
             except Exception as e:
                 print(f"  -> 趋势模型训练失败: {e}")
         else:
-            print(f"  ->历史数据不足 ({len(trend_data)}条)，跳过趋势修正")
+            # 如果剔除后数据太少，可能无法捕捉长期趋势，只能依赖 ML 模型
+            print(f"  -> 历史数据不足 ({len(trend_data_train)}条)，跳过趋势修正")
         # 未来预测
         feature_cols = X_train.columns.tolist()
         date_col = route_processor.date_col

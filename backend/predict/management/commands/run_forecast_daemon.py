@@ -53,6 +53,10 @@ class Command(BaseCommand):
             help='覆盖配置：趋势预测占比'
         )
 
+        parser.add_argument('--del_yiqing', action='store_true', help='强制开启疫情数据剔除')
+        parser.add_argument('--no_del_yiqing', action='store_false', dest='del_yiqing', help='强制关闭疫情数据剔除')
+        parser.set_defaults(del_yiqing=None)
+
     def handle(self, *args, **options):
         # 2. 获取启动参数并保存到实例变量中
         self.top_n = options['top_n']
@@ -61,11 +65,13 @@ class Command(BaseCommand):
         self.future_periods = options['future_periods']
         self.max_workers = options['max_workers']
         self.lr_ratio = options['lr_ratio']
+        self.del_yiqing = options['del_yiqing']
 
         # 生成配置描述字符串，用于日志显示
         config_desc = [f"Top {self.top_n}"]
         if self.model_type: config_desc.append(f"Model: {self.model_type}")
         if self.time_granularity: config_desc.append(f"Granularity: {self.time_granularity}")
+        if self.del_yiqing is not None: config_desc.append(f"DelYiqing: {self.del_yiqing}")
 
         self.config_str = ", ".join(config_desc)
 
@@ -129,6 +135,8 @@ class Command(BaseCommand):
                 cmd_kwargs['max_workers'] = self.max_workers
             if self.lr_ratio:
                 cmd_kwargs['lr_ratio'] = self.lr_ratio
+            if self.del_yiqing is not None:
+                cmd_kwargs['del_yiqing'] = self.del_yiqing
 
             # 调用子命令
             call_command('update_forecasts', **cmd_kwargs)
