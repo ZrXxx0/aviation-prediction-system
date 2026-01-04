@@ -10,13 +10,14 @@ from collections import defaultdict
 import os
 import pandas as pd
 from django.conf import settings
+from django.db.models import Max
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'AirlinePredictSystem.settings')
 django.setup()
 from predict.models import FlightMarketRecord,FleetParam
 # 配置路径
 ROUTE_RANKING_CSV = os.path.join(
-    settings.BASE_DIR, "Predict_Datas", "route_ranking.csv"
+    settings.BASE_DIR, "Predict_Datas", "route_ranking2.csv"
 )
 ROUTE_RANKING_CSV2 = os.path.join(
     settings.BASE_DIR, "Predict_Datas", "route_panel_ranking.csv"
@@ -278,8 +279,6 @@ def get_market_data_bulk(routes, year_months, batch_size=500):
 
 
 
-
-
 def double_filter_routes(report_path=None, top_n=None,
                          valid_csv_path=None, other_csv_path=None):
     """
@@ -401,7 +400,9 @@ def double_filter_routes(report_path=None, top_n=None,
 
     return final_routes.reset_index(drop=True), remaining_routes.reset_index(drop=True)
 
-def get_miu_main(limit: int = None):
+
+
+def get_miu_main(n: int = 500):
     csv_dir = os.path.dirname(ROUTE_RANKING_CSV)
 
     final_routes, remaining_routes = double_filter_routes(
@@ -412,16 +413,23 @@ def get_miu_main(limit: int = None):
     fleet_mapping = get_fleet_mapping()
 
     print("正在读取航线...")
-    routes = get_routes_from_csv(limit)  # 已经是“每对只保留一条”的 routes
+    routes = get_routes_from_csv()  # 已经是“每对只保留一条”的 routes
     if not routes:
         print("未找到航线，退出。")
         return
 
-    one_year_ago = (datetime.datetime.now() - datetime.timedelta(days=365)).year
-    year_months = [f"{one_year_ago}-{str(month).zfill(2)}" for month in range(1, 13)]
+    # 从数据库取最新 year_month（格式 YYYY-MM，字符串 max 就等价于时间最新）
+    latest_ym = FlightMarketRecord.objects.aggregate(m=Max("year_month"))["m"]
+    if not latest_ym:
+        print("FlightMarketRecord 没有数据，退出。")
+    latest_year = int(str(latest_ym)[:4])
+    year_months = [f"{latest_year}-{m:02d}" for m in range(1, 13)]
+    print(
+        f"数据库最新 year_month={latest_ym} -> 使用最新年份={latest_year}，查询 {year_months[0]} ... {year_months[-1]}")
 
     print(f"正在批量获取数据库数据 (Routes: {len(routes)})...")
     records_map = get_market_data_bulk(routes, year_months)
+    # print(records_map)
     print("数据库查询完成，开始计算比例...")
 
     fleet_proportions = {}
@@ -430,7 +438,7 @@ def get_miu_main(limit: int = None):
     global_fleet_stats = defaultdict(int)
 
     # ===== 追加：Other-Other（排除前500条后，按航线等权平均）=====
-    EXCLUDE_TOP_N = 500
+    EXCLUDE_TOP_N = n
     other_sum_props = defaultdict(float)
     other_route_cnt = 0
     other_fleet_keys = set()
@@ -487,4 +495,4 @@ def get_miu_main(limit: int = None):
 
 
 if __name__ == "__main__":
-    get_miu_main()
+    get_miu_main(4)

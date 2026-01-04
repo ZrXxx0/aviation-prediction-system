@@ -87,11 +87,14 @@ class Command(BaseCommand):
         # 2. 计算排名
         self.stdout.write("2. 计算最新的航线排名...")
         ranking_df, top_routes_list = self.generate_ranking_from_df(domestic_data, top_n)
+        ranking_df2 = self.generate_ranking_from_df_qyy(domestic_data)
 
         # 保存排名文件 (train_models_split_topn.py 依赖此文件进行筛选)
 
         ranking_path = os.path.join(base_dir,'route_ranking.csv')
+        ranking_path2 = os.path.join(base_dir, 'route_ranking2.csv')
         ranking_df.to_csv(ranking_path, index=False)
+        ranking_df2.to_csv(ranking_path2, index=False)
         self.stdout.write(f"排名已保存至: {ranking_path}")
 
         # 3. 执行预测
@@ -222,6 +225,54 @@ class Command(BaseCommand):
 
         # 返回 final_stats (用于保存CSV) 和 top_routes (用于后续遍历)
         return final_stats, top_routes
+
+    def generate_ranking_from_df_qyy(self, df):
+        """
+        基于 DataFrame 生成排名 (修正版：按双向汇总排名)
+        """
+        # 1. 预处理年份
+        df['dt'] = pd.to_datetime(df['YearMonth'])
+        df['year'] = df['dt'].dt.year
+
+        # 简化逻辑：取每条航线最大年份的前一年作为基准
+        route_max_dates = df.groupby(['Origin', 'Destination'])['dt'].max().reset_index()
+        route_max_dates['target_year'] = route_max_dates['dt'].dt.year - 1
+
+        merged = pd.merge(df, route_max_dates, on=['Origin', 'Destination'])
+        target_data = merged[merged['year'] == merged['target_year']]
+
+        # 2. 统计单向数据
+        stats = target_data.groupby(['Origin', 'Destination']).agg({
+            'Route_Total_Seats': 'sum',
+            'Distance (KM)': 'mean'
+        }).reset_index()
+
+        # 计算单向的"价值" (ASK)
+        stats['Calculated_Value'] = stats['Route_Total_Seats'] * stats['Distance (KM)']
+
+        # ================= 修改开始 =================
+        # 3. 生成无向航线对标识 (Sort Origin/Dest to make A-B same as B-A)
+        # 使用 frozenset 或 tuple(sorted) 来创建统一的 Key
+        stats['Route_Pair'] = stats.apply(lambda x: tuple(sorted([x['Origin'], x['Destination']])), axis=1)
+
+        # 4. 按航线对聚合计算总价值
+        pair_stats = stats.groupby('Route_Pair')['Calculated_Value'].sum().reset_index()
+        pair_stats = pair_stats.rename(columns={'Calculated_Value': 'Pair_Total_Value'})
+
+        # 5. 对航线对进行排名，取 Top N
+        top_pairs_df = pair_stats.sort_values(by='Pair_Total_Value', ascending=False)
+        top_pairs_set = set(top_pairs_df['Route_Pair'])  # 拿到入选的 Top N 个无向对
+
+        # 6. 反向筛选：从原始 stats 中把属于这些 Pair 的单向航线都找出来
+        # 这样能保证 A->B 和 B->A 同时被选中（如果原始数据里都有的话）
+        final_stats = stats[stats['Route_Pair'].isin(top_pairs_set)].copy()
+
+        # 按单向价值降序排列一下，方便查看
+        final_stats = final_stats.sort_values(by='Calculated_Value', ascending=False)
+
+        # 提取最终要训练的单向列表
+        top_routes = final_stats[['Origin', 'Destination']].values.tolist()
+        return final_stats
 
     def process_and_ingest(self, base_dir, top_routes):
         """

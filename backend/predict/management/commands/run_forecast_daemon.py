@@ -145,17 +145,11 @@ class Command(BaseCommand):
             out_buffer.write("\n\n=== Starting MIU (Fleet Proportion) Update ===\n")
 
             try:
-                if get_miu_main:
-                    # 执行逻辑
-                    get_miu_main()
-                    msg = "MIU Update: Success"
-                    self.stdout.write(self.style.SUCCESS(msg))
-                    out_buffer.write(f"{msg}\n")
-                else:
-                    msg = "MIU Update: Skipped (Module not found)"
-                    self.stdout.write(self.style.WARNING(msg))
-                    out_buffer.write(f"{msg}\n")
-
+                # 执行逻辑
+                get_miu_main(n=self.top_n)
+                msg = "MIU Update: Success"
+                self.stdout.write(self.style.SUCCESS(msg))
+                out_buffer.write(f"{msg}\n")
             except Exception as miu_e:
                 # 捕获 MIU 的错误，但不影响主任务状态
                 miu_trace = traceback.format_exc()
