@@ -1423,7 +1423,8 @@ def download_train_file(request):
 
 import decimal
 from django.db import transaction
-from .predictive_algorithm.utils_flight_import import parse_upload_file_for_preview, parse_csv_content
+from .services import sync_data_to_dashboard
+from .predictive_algorithm.utils_flight_import import *
 
 
 def _to_decimal_or_none(v):
@@ -1433,187 +1434,6 @@ def _to_decimal_or_none(v):
         return decimal.Decimal(str(v))
     except Exception:
         return None
-
-@csrf_exempt
-@require_POST
-def flight_market_upload_preview(request):
-    """
-    步骤1：上传文件
-    - 非冲突行：直接写库（新建）
-    - 冲突行：返回给前端，让用户选覆盖/跳过
-    """
-    upload_file = request.FILES.get("file")
-    if not upload_file:
-        return JsonResponse({"code": 400, "msg": "缺少文件(file)"}, status=400)
-
-    try:
-        all_rows = parse_upload_file_for_preview(upload_file)
-    except Exception as e:
-        return JsonResponse({"code": 500, "msg": f"解析失败: {e}"}, status=500)
-
-    conflict_rows = []
-    auto_created = 0
-
-    with transaction.atomic():
-        model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
-        for row in all_rows:
-            data = row["data"]
-            ym = data.get("year_month")
-            origin = data.get("origin")
-            dest = data.get("destination")
-
-            if not row["has_conflict"]:
-                # 直接新建写库
-                obj = FlightMarketRecord()
-                # 系统管理的字段，不参与设置
-                excluded_fields = {"id", "created_at", "updated_at"}
-                for field_name, value in data.items():
-                    # 跳过系统管理的字段
-                    if field_name in excluded_fields:
-                        continue
-                    if field_name not in model_field_names:
-                        continue
-                    
-                    if field_name in ("year_month", "origin", "destination", "equipment", "region"):
-                        setattr(obj, field_name, value)
-                    elif field_name == "international_flight":
-                        if isinstance(value, bool):
-                            setattr(obj, field_name, value)
-                        else:
-                            setattr(obj, field_name, str(value).lower() == "true")
-                    else:
-                        setattr(obj, field_name, _to_decimal_or_none(value))
-                obj.save()
-                auto_created += 1
-            else:
-                # 冲突行先不动，丢到列表里返回前端
-                conflict_rows.append(row)
-
-    return JsonResponse({
-        "code": 0,
-        "msg": "ok",
-        "data": {
-            "auto_created": auto_created,   # 已直接导入多少条
-            "conflict_rows": conflict_rows  # 需要人工处理的冲突行
-        }
-    })
-
-@csrf_exempt
-@require_POST
-def flight_market_upload_commit(request):
-    """
-    步骤2：前端提交“冲突行 + action”
-    body: {
-      "rows": [
-        {
-          "action": "overwrite" | "skip",
-          "data": {...}
-        }, ...
-      ]
-    }
-    """
-    try:
-        body = json.loads(request.body.decode("utf-8"))
-    except Exception:
-        return JsonResponse({"code": 400, "msg": "请求体必须是 JSON"}, status=400)
-
-    rows = body.get("rows") or []
-    if not isinstance(rows, list):
-        return JsonResponse({"code": 400, "msg": "rows 必须是数组"}, status=400)
-
-    updated = 0
-    skipped = 0
-    objects_to_update = []
-    objects_to_create = []
-    now = timezone.now()
-
-    with transaction.atomic():
-        model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
-        for row in rows:
-            action = row.get("action", "skip")
-            data = row.get("data") or {}
-            ym = data.get("year_month")
-            origin = data.get("origin")
-            dest = data.get("destination")
-
-            if action == "skip":
-                skipped += 1
-                continue
-
-            # 理论上必然存在，因为这是"冲突行"
-            obj = FlightMarketRecord.objects.filter(
-                year_month=ym,
-                origin=origin,
-                destination=dest,
-            ).first()
-            
-            excluded_fields = {"id", "created_at", "updated_at"}
-            
-            if not obj:
-                # 极端情况：中间被删了，那就当新建
-                obj = FlightMarketRecord()
-                is_new = True
-            else:
-                # 如果存在，保留 id 和 created_at
-                # updated_at 需要手动设置为当前时间（因为 bulk_update 不会自动更新 auto_now 字段）
-                is_new = False
-
-            # 覆盖所有字段（排除 id, created_at, updated_at，这些字段由系统管理）
-            for field_name, value in data.items():
-                # 跳过系统管理的字段
-                if field_name in excluded_fields:
-                    continue
-
-                # qty增加下面
-                if field_name not in model_field_names:
-                    continue
-                # 关键逻辑：如果这一列在 CSV 里是空的，就不覆盖原值
-                if value is None or (isinstance(value, str) and value.strip() == ""):
-                    continue
-                    
-                if field_name in ("year_month", "origin", "destination", "equipment", "region"):
-                    setattr(obj, field_name, value)
-                elif field_name == "international_flight":
-                    if isinstance(value, bool):
-                        setattr(obj, field_name, value)
-                    else:
-                        setattr(obj, field_name, str(value).lower() == "true")
-                else:
-                    setattr(obj, field_name, _to_decimal_or_none(value))
-            
-            # 对于更新操作，手动设置 updated_at
-            if not is_new:
-                obj.updated_at = now
-                objects_to_update.append(obj)
-            else:
-                objects_to_create.append(obj)
-        
-        # 批量创建新记录
-        if objects_to_create:
-            FlightMarketRecord.objects.bulk_create(objects_to_create)
-            updated += len(objects_to_create)
-        
-        # 批量更新现有记录
-        if objects_to_update:
-            # 获取所有需要更新的字段名（排除系统管理字段）
-            update_fields = [f.name for f in FlightMarketRecord._meta.get_fields() 
-                           if f.name not in {'id', 'created_at', 'updated_at'} 
-                           and not (f.many_to_many or f.one_to_many or f.many_to_one)]
-            # 确保 updated_at 在更新字段列表中
-            if 'updated_at' not in update_fields:
-                update_fields.append('updated_at')
-            
-            FlightMarketRecord.objects.bulk_update(objects_to_update, update_fields)
-            updated += len(objects_to_update)
-
-    return JsonResponse({
-        "code": 0,
-        "msg": "冲突处理完成",
-        "data": {
-            "updated": updated,
-            "skipped": skipped,
-        }
-    })
 
 
 # 前端上传接口（适配前端 CSV 文本格式，同时支持上传 Excel 文件）
@@ -1774,10 +1594,12 @@ def upload_insert(request):
 
         # 插入数据
         created_count = 0
+        rows_data_for_sync = []  # 用于同步的数据快照
         with transaction.atomic():
             model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
             for row in all_rows:
                 data = row['data']
+                rows_data_for_sync.append(data)  # 收集数据用于后续同步
                 ym = data.get('year_month', '').strip()
                 origin = data.get('origin', '').strip().upper()
                 dest = data.get('destination', '').strip().upper()
@@ -1812,6 +1634,15 @@ def upload_insert(request):
                 except Exception as e:
                     # 忽略唯一约束冲突（可能并发插入）
                     continue
+
+        try:
+            sync_data_to_dashboard(rows_data_for_sync)
+        except Exception as e:
+            print(f"⚠️ 看板同步失败: {e}")
+            return JsonResponse({
+                'success': False,
+                'message': '看板同步失败'
+            }, status=400)
 
         return JsonResponse({
             'success': True,
@@ -1896,6 +1727,7 @@ def upload_resolve(request):
         objects_to_update = []
         objects_to_create = []
         now = timezone.now()
+        rows_data_for_sync = []  # 用于同步
         
         with transaction.atomic():
             model_field_names = {f.name for f in FlightMarketRecord._meta.concrete_fields}
@@ -1909,6 +1741,7 @@ def upload_resolve(request):
                 
                 # action == 'replace'
                 new_data = data_map.get(key)
+                rows_data_for_sync.append(new_data)  # 收集
                 if not new_data:
                     continue
                 
@@ -1916,6 +1749,7 @@ def upload_resolve(request):
                 ym = (new_data.get('year_month') or '').strip()
                 origin = (new_data.get('origin') or '').strip().upper()
                 dest = (new_data.get('destination') or '').strip().upper()
+                equipment = new_data.get('equipment').strip()
                 
                 if not ym or not origin or not dest:
                     continue
@@ -1925,6 +1759,7 @@ def upload_resolve(request):
                     year_month=ym,
                     origin=origin,
                     destination=dest,
+                    equipment=equipment
                 ).first()
                 
                 excluded_fields = {'id', 'created_at', 'updated_at'}
@@ -1983,7 +1818,16 @@ def upload_resolve(request):
                 
                 FlightMarketRecord.objects.bulk_update(objects_to_update, update_fields)
                 updated_count += len(objects_to_update)
-        
+
+        try:
+            sync_data_to_dashboard(rows_data_for_sync)
+        except Exception as e:
+            print(f"⚠️ 看板同步失败: {e}")
+            return JsonResponse({
+                'success': False,
+                'message': '看板同步失败'
+            }, status=400)
+
         return JsonResponse({
             'success': True,
             'message': f'处理完成：更新 {updated_count} 条，跳过 {skipped_count} 条'

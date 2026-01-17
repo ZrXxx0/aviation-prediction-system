@@ -364,11 +364,10 @@ def statistics_summary_view(request):
 
     print(f"🔍 接收到的参数 - year_month: {year_month}, start_city: {start_city}, end_city: {end_city}")
 
-    # 参数校验
+    # --- 参数校验 (保持不变) ---
     if not year_month:
         return Response({"error": "请提供 year_month 参数"}, status=400)
     try:
-        # 解析年月参数
         if '-' not in year_month:
             return Response({"error": "year_month 格式应为 YYYY-MM，如 2024-06"}, status=400)
 
@@ -376,9 +375,6 @@ def statistics_summary_view(request):
         year = int(year_str)
         month = int(month_str)
 
-        print(f"🔍 解析后的时间参数 - year: {year}, month: {month}")
-
-        # 验证月份范围
         if month < 1 or month > 12:
             return Response({"error": "月份必须在1-12之间"}, status=400)
 
@@ -386,9 +382,8 @@ def statistics_summary_view(request):
         print(f"❌ 时间参数解析失败: {e}")
         return Response({"error": "year_month 格式应为 YYYY-MM，如 2024-06"}, status=400)
 
-    # 初始查询
+    # --- 初始查询与筛选 (保持不变) ---
     qs = RouteMonthlyStat.objects.filter(year=year, month=month)
-    print(f"🔍 查询条件: year={year}, month={month}, 查询结果数量: {qs.count()}")
 
     # 起始城市筛选
     if start_city:
@@ -396,7 +391,6 @@ def statistics_summary_view(request):
         if not origin_codes:
             return Response({"error": f"未找到起始城市 {start_city} 的三字码"}, status=404)
         qs = qs.filter(origin_code__in=origin_codes)
-        print(f"🔍 筛选起始城市 {start_city}，机场代码: {origin_codes}")
 
     # 终点城市筛选
     if end_city:
@@ -404,21 +398,27 @@ def statistics_summary_view(request):
         if not destination_codes:
             return Response({"error": f"未找到终点城市 {end_city} 的三字码"}, status=404)
         qs = qs.filter(destination_code__in=destination_codes)
-        print(f"🔍 筛选终点城市 {end_city}，机场代码: {destination_codes}")
 
-    # 聚合数据
+    print(f"🔍 最终查询结果数量: {qs.count()}")
+
+    # --- 核心修改部分 ---
+
+    # 1. 获取航线数量 (直接统计 QuerySet 的条目数)
+    route_count = qs.count()
+
+    # 2. 聚合数据 (去掉了 volume 的求和)
     summary = qs.aggregate(
         capacity=Sum("Route_Total_Seats"),
-        volume=Sum("passenger_volume"),
         flights=Sum("Route_Total_Flights"),
     )
 
-    # 用默认值处理 None 情况，人次数据除以10000转换为万人次
+    # 3. 构造返回结果
     result = {
-        "capacity": round((summary["capacity"] or 0) / 10000, 2),  # 运力转换为万人次
-        "volume": round((summary["volume"] or 0) / 10000, 2),      # 运量转换为万人次
-        "flights": int(summary["flights"] or 0),                   # 航班数量保持原单位
+        "capacity": round((summary["capacity"] or 0) / 10000, 2),  # 运力 (万人次)
+        "volume": route_count,  # 这里直接返回航线数量 (整数)
+        "flights": int(summary["flights"] or 0),  # 航班数量
     }
+
     print(f"✅ 返回统计数据: {result}")
     return Response(result)
 

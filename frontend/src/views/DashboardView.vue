@@ -110,9 +110,9 @@
             <div class="unit">万 人次/月</div>
           </div>
           <div class="stat-card">
-            <h3>🛩️ 总运量</h3>
+            <h3>🛩️ 航线数量</h3>
             <div class="value">{{ filteredStats.volume.toLocaleString() }}</div>
-            <div class="unit">万 人次/月</div>
+            <div class="unit">条/月</div>
           </div>
           <div class="stat-card">
             <h3>🛫 航班数量</h3>
@@ -166,7 +166,7 @@ import apiConfig from '@/config/api.js';
 
 echarts.registerMap('china', chinaMap as any);
 const month_number = ref(12) // 默认12个月，与timePeriod保持一致
-const selectedDate = ref('2024-05'); // 默认2024年5月
+const selectedDate = ref('2025-12');
 const selectedMapSelectedCity = ref([['']] as any[]); // 城市筛选，默认全国
 const selectedMapCity = ref([''] as string[]); // 地图查看起点城市
 const selectedMapToCity = ref([''] as string[]); // 地图查看终点城市
@@ -1120,7 +1120,7 @@ const renderCubeBarChart = () => {
       }
     },
     legend: {
-      data: ['座次', '运量', '航班数量'],
+      data: ['座次', '航班数量'],
       textStyle: { color: '#052233' },
       top: 10
     },
@@ -1185,30 +1185,30 @@ const renderCubeBarChart = () => {
         symbol: 'circle',
         symbolSize: 8
       },
-      {
-        name: '运量',
-        type: 'line',
-        yAxisIndex: 0,
-        data: volumeData,
-        smooth: true,
-        lineStyle: {
-          width: 2,
-          color: '#246eff'
-        },
-        itemStyle: {
-          color: '#246eff',
-          borderWidth: 1,
-          borderColor: '#fff'
-        },
-        // areaStyle: {
-        //   color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-        //     { offset: 0, color: 'rgba(69, 183, 209, 0.3)' },
-        //     { offset: 1, color: 'rgba(69, 183, 209, 0.1)' }
-        //   ])
-        // },
-        symbol: 'diamond',
-        symbolSize: 8
-      },
+      // {
+      //   name: '运量',
+      //   type: 'line',
+      //   yAxisIndex: 0,
+      //   data: volumeData,
+      //   smooth: true,
+      //   lineStyle: {
+      //     width: 2,
+      //     color: '#246eff'
+      //   },
+      //   itemStyle: {
+      //     color: '#246eff',
+      //     borderWidth: 1,
+      //     borderColor: '#fff'
+      //   },
+      //   // areaStyle: {
+      //   //   color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+      //   //     { offset: 0, color: 'rgba(69, 183, 209, 0.3)' },
+      //   //     { offset: 1, color: 'rgba(69, 183, 209, 0.1)' }
+      //   //   ])
+      //   // },
+      //   symbol: 'diamond',
+      //   symbolSize: 8
+      // },
       {
         name: '航班数量',
         type: 'bar',
