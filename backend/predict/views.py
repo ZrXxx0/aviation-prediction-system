@@ -2213,7 +2213,7 @@ def forecast_panels_view(request):
             )
 
         try:
-            start_year = int(request.GET.get("start_year", "2024"))
+            start_year = int(request.GET.get("start_year", "2026"))
         except ValueError:
             return JsonResponse(
                 {"success": False, "error": "start_year 必须是整数年份"},

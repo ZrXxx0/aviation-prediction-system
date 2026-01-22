@@ -222,7 +222,7 @@ import { ElMessage } from 'element-plus'
 /* =============================
    基础状态
 ============================= */
-const years = ref(2025)
+const years = ref(2026)
 const selectedClass = ref('large')   // large / medium / all
 const viewMode = ref('table')
 

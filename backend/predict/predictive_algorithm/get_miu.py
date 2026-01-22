@@ -495,4 +495,4 @@ def get_miu_main(n: int = 500):
 
 
 if __name__ == "__main__":
-    get_miu_main(4)
+    get_miu_main()
